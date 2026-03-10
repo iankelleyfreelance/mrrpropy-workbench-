@@ -5,9 +5,6 @@ from pathlib import Path
 import xarray as xr
 
 import matplotlib
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 
 matplotlib.use("Agg")  # imprescindible en CI/headless
 

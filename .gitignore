@@ -5,6 +5,7 @@ __pycache__/
 *.csv
 *.png 
 
+
 # C extensions
 *.so
 
@@ -57,6 +58,10 @@ cover/
 tests/__pycache__/
 tests/.pytest_cache/
 tests/**/*.png
+tests/data/**/2025/10/**/*.nc
+tests/data/PRODUCTS/**/*.nc
+tests/figures/**/*.png
+tests/**/gaia*.py
 
 # Translations
 *.mo

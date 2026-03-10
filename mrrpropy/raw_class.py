@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -16,14 +17,16 @@ from datetime import datetime
 import mrrpropy.RaProMPro_original as rpm
 from mrrpropy.utils import (
     ols_slope_intercept_r2,
-    compute_eps,
+    compute_eps )
+from mrrpropy.hexagram import (
     build_rgb_from_trends,
-    _sign_from_center,
-    _strength,
     map_rgb_to_hexagram,
     get_hexagram_assets,
-)
-
+    get_process_hexagram_mask,
+    PROCESS_SIGNATURES,
+    PROCESS_CODES,
+    PROCESS_MARKERS
+    )
 
 DatetimeLike = Union[str, np.datetime64, datetime]
 
@@ -1134,12 +1137,12 @@ class MRRProData:
 
         # Rango a representar
         if range_limits is None:
-            r0 = float(da["range"].min().values)
-            r1 = float(da["range"].max().values)
+            r0 = float(ds["range"].min().values)
+            r1 = float(ds["range"].max().values)
         else:
             r0, r1 = map(float, range_limits)
 
-        ranges = da["range"].sel(range=slice(r0, r1)).values.astype(float)
+        ranges = ds["range"].sel(range=slice(r0, r1)).values.astype(float)
 
         #Spectrum 
         if 'spectrum_n_samples' in da.sizes:
@@ -1547,7 +1550,6 @@ class MRRProData:
         vmin: float | None = None,
         vmax: float | None = None,
         fig: Figure | None = None,
-        ax=None,
         output_dir: Path | None = None,
         savefig: bool = False,
         **kwargs,
@@ -1598,9 +1600,9 @@ class MRRProData:
         cmap = kwargs.get("cmap", pcfg.cmap)
         figsize = kwargs.get("figsize", pcfg.figsize)
 
-        if fig is None and ax is None:
+        if fig is None:
             fig, ax = plt.subplots(figsize=figsize)
-        elif fig is not None and ax is None:
+        elif fig is not None:
             ax = fig.get_axes()[0]
 
         t_sel, ranges, vel, spec2d, units = self._get_spectrogram_2d(
@@ -2369,7 +2371,7 @@ class MRRProData:
 
                 b_arr[it] = float(b)
                 a_arr[it] = float(a)
-                r2_arr[it] = float(r2)
+                r2_arr[it] = float(rain_process_analyze)
                 F_arr[it] = float(np.exp(b * dz))
 
                 # traceability
@@ -2678,7 +2680,16 @@ class MRRProData:
         tol_center: float = 0.05,
         min_strength: float = 0.10,
     ) -> xr.Dataset:
-                
+        """
+        Classify rain process from analysis output using PROCESS_SIGNATURES from
+        mrrpropy.hexagram.
+
+        Assumes RGB mapping:
+            R -> Dm
+            G -> Nw
+            B -> LWC
+        """
+
         if analysis is None or not isinstance(analysis, xr.Dataset):
             raise TypeError("analysis debe ser un xr.Dataset (salida de rain_process_analyze).")
         if "time" not in analysis.coords:
@@ -2687,9 +2698,9 @@ class MRRProData:
             if v not in analysis:
                 raise KeyError("analysis debe incluir R,G,B (decisión tomada en rain_process_analyze).")
 
-        # opcional: si tus reglas están calibradas para un mapping concreto:
+        # El clasificador está calibrado para este mapping
         expected = {"R": "Dm", "G": "Nw", "B": "LWC"}
-        rgb_map = analysis.attrs.get("rgb_mapping", None)        
+        rgb_map = analysis.attrs.get("rgb_mapping", None)
         if rgb_map != expected:
             raise ValueError(f"rgb_mapping={rgb_map} pero este clasificador espera {expected}.")
 
@@ -2699,289 +2710,311 @@ class MRRProData:
 
         ok = np.isfinite(R) & np.isfinite(G) & np.isfinite(B)
 
+        def _sign_from_center(u: np.ndarray, tol: float) -> np.ndarray:
+            s = np.zeros(u.shape, dtype=int)
+            s[u > 0.5 + tol] = +1
+            s[u < 0.5 - tol] = -1
+            return s
+
+        def _strength(u: np.ndarray) -> np.ndarray:
+            return np.clip(np.abs(u - 0.5) / 0.5, 0.0, 1.0)
+
         sR = np.zeros(R.shape, dtype=int)
         sG = np.zeros(G.shape, dtype=int)
         sB = np.zeros(B.shape, dtype=int)
         if np.any(ok):
-            sR[ok] = _sign_from_center(R[ok])
-            sG[ok] = _sign_from_center(G[ok])
-            sB[ok] = _sign_from_center(B[ok])
+            sR[ok] = _sign_from_center(R[ok], tol_center)
+            sG[ok] = _sign_from_center(G[ok], tol_center)
+            sB[ok] = _sign_from_center(B[ok], tol_center)
 
         strg = np.zeros(R.shape, dtype=float)
         if np.any(ok):
-            strg[ok] = np.minimum.reduce([_strength(R[ok]), _strength(G[ok]), _strength(B[ok])])
+            strg[ok] = np.minimum.reduce([
+                _strength(R[ok]),
+                _strength(G[ok]),
+                _strength(B[ok]),
+            ])
 
-        label = np.full(R.shape, "unknown", dtype=object)
-        score = np.zeros(R.shape, dtype=float)
+        # start labels
+        label = np.full(R.shape, "no_data", dtype=object)
+        label[ok] = "unknown"
 
-        def match(wR, wG, wB):
-            m = ok.copy()
-            m &= (sR == wR) & (sG == wG) & (sB == wB)
-            return m
+        def _normalize_signatures(sig_def):
+            if isinstance(sig_def, tuple) and len(sig_def) == 3:
+                return [tuple(sig_def)]
+            if isinstance(sig_def, (list, tuple)):
+                out = []
+                for item in sig_def:
+                    if isinstance(item, (list, tuple)) and len(item) == 3:
+                        out.append(tuple(item))
+                if out:
+                    return out
+            raise ValueError(f"Firma no válida: {sig_def!r}")
 
-        # Reglas (ASUMEN la convención RGB ya fijada en analysis.attrs["rgb_convention"])
-        m_breakup = match(0, +1, -1)
-        m_coal    = match(0, -1, +1)
-        m_evap    = match(-1, -1, -1)
-        m_auto    = match(+1, +1, -1)
-        m_act     = match(+1, +1, +1)
+        # classify using PROCESS_SIGNATURES
+        label = np.full(R.shape, "no_data", dtype=object)
+        label[ok] = "unknown"
 
-        for m, name in [
-            (m_evap, "evaporation"),
-            (m_breakup, "breakup"),
-            (m_coal, "coalescence"),
-            (m_auto, "autoconversion"),
-            (m_act, "activation"),
-        ]:
-            take = m & (label == "unknown")
-            label[take] = name
+        for proc_name, sig_def in PROCESS_SIGNATURES.items():
+            signatures = _normalize_signatures(sig_def)
 
-        score[ok] = strg[ok]
+            m_proc = np.zeros(R.shape, dtype=bool)
+            for wR, wG, wB in signatures:
+                m_proc |= ok & (sR == wR) & (sG == wG) & (sB == wB)
+
+            take = m_proc & (label == "unknown")
+            label[take] = proc_name
+
+        # weak signal overrides any process except no_data
         weak = ok & (strg < min_strength)
         label[weak] = "steady_or_weak"
 
         out = xr.Dataset(coords={"time": analysis["time"].values})
-        out["proc_label"] = xr.DataArray(label, dims=("time",))        
+        out["proc_label"] = xr.DataArray(label, dims=("time",))
         out["sign_R"] = xr.DataArray(sR, dims=("time",))
         out["sign_G"] = xr.DataArray(sG, dims=("time",))
         out["sign_B"] = xr.DataArray(sB, dims=("time",))
         out["strength"] = xr.DataArray(strg, dims=("time",))
 
-        # Copia RGB (para plots)
+        # copy RGB for plotting / diagnostics
         out["R"] = analysis["R"]
         out["G"] = analysis["G"]
         out["B"] = analysis["B"]
 
-        # Copia hex/minutes si existen (para plots multipanel)
+        # copy optional vars useful for plotting
         for v in ("hex_x", "hex_y", "hex_area", "minutes", "snap_R", "snap_G", "snap_B"):
             if v in analysis:
                 out[v] = analysis[v]
 
-        # Metadata (decisiones ya tomadas)
+        # metadata
         out.attrs["tol_center"] = float(tol_center)
         out.attrs["min_strength"] = float(min_strength)
-        for key in ("rgb_convention", "period_start", "period_end", "z_top", "z_base", "k", "rgb_q", "eps_q", "ze_th", "min_points_ols"):
+        out.attrs["rgb_mapping"] = rgb_map
+
+        for key in (
+            "rgb_convention",
+            "period_start",
+            "period_end",
+            "z_top",
+            "z_base",
+            "k",
+            "rgb_q",
+            "eps_q",
+            "ze_th",
+            "min_points_ols",
+        ):
             if key in analysis.attrs:
                 out.attrs[key] = analysis.attrs[key]
 
         return out
 
-
-    def plot_microphysics_summary_multipanel(
+    def plot_processes_evolution(
         self,
         *,
-        analysis: xr.Dataset,
         classified: xr.Dataset,
-        show_path_line: bool = True,
+        analysis: xr.Dataset | None = None,
         savefig: bool = False,
-        output_dir: "Path | None" = None,
+        output_dir: Path | None = None,
         **kwargs,
-    ) -> "tuple[Figure, Path | None]":
+    ) -> tuple[Figure, Path | None]:
         """
-        Plot multipanel (PLOT-ONLY) coherente con el pipeline:
+        Plot-only temporal summary of classified rain processes.
 
-            analysis   = rain_process_analyze(...)
-            classified = classify_rain_process(analysis=analysis, ...)
+        Panels
+        ------
+        (a) Process timeline vs time (color = strength)
+        (b) Signs heatmap 3×time (-1 / 0 / +1)
 
-        Paneles:
-        (a) Hexagrama + trayectoria temporal (color = minutes)
-        (b) Timeline de proc_label (color = strength)
-        (c) Signos (sign_R/G/B) vs tiempo
-        (d) Strength vs tiempo
-
-        Todas las decisiones científicas (RGB, k, reglas, etc.)
-        deben estar ya contenidas en `analysis` y `classified`.
+        Notes
+        -----
+        - Process codes A, B, C... are shown on the y-axis of panel (a).
+        - Their meaning is shown in a figure legend below the panels.
+        - If a process exists in mrrpropy.hexagram.PROCESS_SIGNATURES, its signature is
+        appended in the legend.
+        - Colorbars live in fixed GridSpec columns, so subplot widths remain aligned.
+        - The function does not classify anything; it only visualizes `classified`.
         """
+
+        from mrrpropy.hexagram import PROCESS_SIGNATURES, PROCESS_CODES
 
         # ------------------------------------------------------------------
         # Plot configuration
         # ------------------------------------------------------------------
         pcfg = self.plot_cfg
         cmap = kwargs.get("cmap", pcfg.cmap)
-        figsize = kwargs.get("figsize", pcfg.figsize_multipanel)
-        alpha_hexagram = kwargs.get("alpha_hexagram", pcfg.alpha_hexagram)
-        markersize = kwargs.get("markersize", pcfg.markersize)
-        line_width = kwargs.get("line_width", pcfg.linewidth)
+        figsize = kwargs.get("figsize", getattr(pcfg, "figsize_multipanel", (10, 5)))
         dpi = kwargs.get("dpi", pcfg.dpi)
+
+        markersize_tl = kwargs.get("markersize_timeline", 28.0)
+        heatmap_cmap = kwargs.get("heatmap_cmap", "coolwarm")
+        title_fs = kwargs.get("title_fs", 18)
+        label_fs = kwargs.get("label_fs", 16)
+        tick_fs = kwargs.get("tick_fs", 14)
+        legend_fs = kwargs.get("legend_fs", max(10, tick_fs - 2))
+
+        # Optional fixed order for processes. Any unseen labels are appended at the end.
+        process_order = kwargs.get(
+            "process_order",
+            [
+                "unknown",
+                "steady_or_weak",
+                "evaporation",
+                "breakup",
+                "coalescence",
+                "growth",
+                "activation",
+                "autoconversion",
+                "no_data",
+            ],
+        )
 
         # ------------------------------------------------------------------
         # Sanity checks
         # ------------------------------------------------------------------
-        if not isinstance(analysis, xr.Dataset):
-            raise TypeError("analysis debe ser un xr.Dataset (salida de rain_process_analyze).")
         if not isinstance(classified, xr.Dataset):
-            raise TypeError("classified debe ser un xr.Dataset (salida de classify_rain_process).")
+            raise TypeError("classified debe ser un xr.Dataset.")
+        if "time" not in classified.coords:
+            raise KeyError("classified debe tener coord 'time'.")
 
-        for ds, name in [(analysis, "analysis"), (classified, "classified")]:
-            if "time" not in ds.coords:
-                raise KeyError(f"{name} debe tener coord 'time'.")
-
-        for v in ("hex_x", "hex_y", "minutes"):
-            if v not in analysis:
-                raise KeyError(f"analysis debe contener '{v}'.")
-
-        for v in ("proc_label", "sign_R", "sign_G", "sign_B", "strength"):
+        required = ("proc_label", "strength", "sign_R", "sign_G", "sign_B")
+        for v in required:
             if v not in classified:
                 raise KeyError(f"classified debe contener '{v}'.")
 
-        # k debe venir del análisis
-        k = analysis.attrs.get("k", None)
-        if k is None:
-            raise KeyError("analysis.attrs['k'] no existe (necesario para dibujar el hexagrama).")
+        if analysis is not None:
+            if not isinstance(analysis, xr.Dataset):
+                raise TypeError("analysis debe ser xr.Dataset si se proporciona.")
+            classified, analysis = xr.align(classified, analysis, join="inner")
 
-        # RGB mapping solo para trazabilidad
-        rgb_map = analysis.attrs.get("rgb_mapping", None)
-        rgb_txt = ""
-        if rgb_map is not None:
-            rgb_txt = " | " + ", ".join(f"{c}={v}" for c, v in rgb_map.items())
-
-        # ------------------------------------------------------------------
-        # Align datasets in time
-        # ------------------------------------------------------------------
-        analysis_a, classified_a = xr.align(analysis, classified, join="inner")
-        t = analysis_a["time"].values
+        t = classified["time"].values
         if t.size == 0:
-            raise ValueError("analysis y classified no tienen intersección temporal.")
+            raise ValueError("classified no contiene tiempos tras el alineamiento.")
 
         # ------------------------------------------------------------------
-        # Figure layout
+        # Heatmap row labels from rgb_mapping if available
+        # ------------------------------------------------------------------
+        row_labels = ["R", "G", "B"]
+        rgb_map = None
+        if analysis is not None:
+            rgb_map = analysis.attrs.get("rgb_mapping", None)
+        else:
+            rgb_map = classified.attrs.get("rgb_mapping", None)
+
+        if isinstance(rgb_map, dict) and all(k in rgb_map for k in ("R", "G", "B")):
+            row_labels = [
+                f"R ({rgb_map['R']})",
+                f"G ({rgb_map['G']})",
+                f"B ({rgb_map['B']})",
+            ]
+
+        # ------------------------------------------------------------------
+        # Timeline categorical encoding -> A, B, C...
+        # Use a stable process order, not order of first appearance.
+        # ------------------------------------------------------------------
+        df = classified[["proc_label", "strength"]].to_dataframe().reset_index()
+        labels = df["proc_label"].astype(str).fillna("unknown").to_numpy()
+
+        present_labels = list(pd.unique(labels))
+        ordered_labels = [lab for lab in process_order if lab in present_labels]
+        extra_labels = [lab for lab in present_labels if lab not in ordered_labels]
+        uniq = ordered_labels + extra_labels
+
+        if len(uniq) > 26:
+            raise ValueError("Hay más de 26 categorías de proceso; A,B,C... ya no basta.")
+
+        # Map process label -> display code
+        map_code = {lab: PROCESS_CODES.get(lab, lab.upper()) for lab in uniq}
+        # numeric y index
+        y_index = np.array([uniq.index(l) for l in labels], dtype=int)
+
+        # ------------------------------------------------------------------
+        # Layout: 2 rows × 2 cols (plots + fixed colorbar column)
+        # Extra bottom margin for the figure legend.
         # ------------------------------------------------------------------
         fig = plt.figure(figsize=figsize)
-        gs = fig.add_gridspec(4, 1, height_ratios=[2.2, 1.0, 1.2, 1.0], hspace=0.25)
-
-        ax_hex = fig.add_subplot(gs[0, 0])
-        ax_tl  = fig.add_subplot(gs[1, 0])
-        ax_sgn = fig.add_subplot(gs[2, 0])
-        ax_str = fig.add_subplot(gs[3, 0])
-
-        # ------------------------------------------------------------------
-        # (a) Hexagram + trajectory
-        # ------------------------------------------------------------------
-        assets = get_hexagram_assets(k=k)
-        img = assets["img"]
-
-        ax_hex.imshow(
-            img,
-            origin="lower",
-            interpolation="nearest",
-            alpha=alpha_hexagram,
+        gs = fig.add_gridspec(
+            nrows=2,
+            ncols=2,
+            width_ratios=[40, 1.2],
+            height_ratios=[1.35, 1.0],
+            wspace=0.08,
+            hspace=0.50,
         )
 
-        hx = analysis_a["hex_x"].values.astype(float)
-        hy = analysis_a["hex_y"].values.astype(float)
-        minutes = analysis_a["minutes"].values.astype(float)
+        ax_tl = fig.add_subplot(gs[0, 0])
+        cax_tl = fig.add_subplot(gs[0, 1])
 
-        ok = (
-            np.isfinite(hx)
-            & np.isfinite(hy)
-            & np.isfinite(minutes)
-            & (hx >= 0)
-            & (hy >= 0)
-        )
+        ax_hm = fig.add_subplot(gs[1, 0], sharex=ax_tl)
+        cax_hm = fig.add_subplot(gs[1, 1])
 
-        if np.any(ok):
-            sc = ax_hex.scatter(
-                hx[ok],
-                hy[ok],
-                c=minutes[ok],
-                cmap=cmap,
-                s=markersize,
-                edgecolors="black",
-                linewidths=0.1,
-            )
-            cbar = fig.colorbar(sc, ax=ax_hex, fraction=0.03, pad=0.01)
-            cbar.set_label("Minutes since start")
-
-            if show_path_line:
-                idx = np.argsort(minutes[ok])
-                ax_hex.plot(
-                    hx[ok][idx],
-                    hy[ok][idx],
-                    color="black",
-                    lw=line_width,
-                    alpha=0.4,
-                )
-
-        layer_txt = ""
-        if "z_top" in analysis_a.attrs and "z_base" in analysis_a.attrs:
-            layer_txt = f" | layer {analysis_a.attrs['z_top']:.0f}-{analysis_a.attrs['z_base']:.0f} m"
-
-        ax_hex.set_title(f"(a) Hexagram trajectory | k={k}{layer_txt}{rgb_txt}")
-        ax_hex.set_xlabel("hex_x")
-        ax_hex.set_ylabel("hex_y")
-        ax_hex.set_xlim(-0.5, img.shape[1] - 0.5)
-        ax_hex.set_ylim(-0.5, img.shape[0] - 0.5)
-        ax_hex.grid(False)
+        plt.setp(ax_tl.get_xticklabels(), visible=False)
 
         # ------------------------------------------------------------------
-        # (b) Process timeline
+        # (a) Timeline: proc_label vs time, color = strength
         # ------------------------------------------------------------------
-        df = classified_a[["proc_label", "strength"]].to_dataframe().reset_index()
-        cat = pd.Categorical(df["proc_label"])
-        y = cat.codes.astype(int)
-        y[y < 0] = len(cat.categories)
-
-        sc2 = ax_tl.scatter(
+        sc = ax_tl.scatter(
             df["time"].to_numpy(),
-            y,
-            c=df["strength"].to_numpy(),
+            y_index,
+            c=df["strength"].to_numpy(dtype=float),
             cmap=cmap,
-            s=30,
-            vmin=0,
-            vmax=1,
+            s=markersize_tl,
+            vmin=0.0,
+            vmax=1.0,
+            edgecolors="none",
         )
 
-        ax_tl.set_title("(b) Process timeline (color = strength)")
-        ax_tl.set_ylabel("Process")
-        ax_tl.set_yticks(range(len(cat.categories)))
-        ax_tl.set_yticklabels(list(cat.categories))
-        ax_tl.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        ax_tl.set_title("(a) Process timeline (color = strength)", fontsize=title_fs)
+        ax_tl.set_ylabel("Process", fontsize=label_fs)
+        ax_tl.set_yticks(range(len(uniq)))
+        ax_tl.set_yticklabels([map_code[l] for l in uniq], fontsize=tick_fs)
+        ax_tl.tick_params(labelsize=tick_fs)
 
-        fig.colorbar(sc2, ax=ax_tl, fraction=0.03, pad=0.01)
+        cb1 = fig.colorbar(sc, cax=cax_tl)
+        cb1.set_label("strength (0–1)", fontsize=label_fs)
+        cax_tl.tick_params(labelsize=tick_fs)
 
         # ------------------------------------------------------------------
-        # (c) Signs vs time
+        # (b) Heatmap of signs
         # ------------------------------------------------------------------
+        sR = classified["sign_R"].values.astype(float)
+        sG = classified["sign_G"].values.astype(float)
+        sB = classified["sign_B"].values.astype(float)
+
+        S = np.vstack([sR, sG, sB])
+        S = np.where(np.isfinite(S), S, 0.0)
+
         tnum = mdates.date2num(pd.to_datetime(t).to_pydatetime())
+        if tnum.size == 1:
+            dt = 1.0 / (24 * 60)
+            tnum = np.array([tnum[0] - dt, tnum[0] + dt])
 
-        def _plot_sign(ax, s, label):
-            ax.step(tnum, s, where="mid")
-            ax.axhline(0, color="k", lw=0.6)
-            ax.set_yticks([-1, 0, 1])
-            ax.set_yticklabels(["−", "0", "+"])
-            ax.set_ylabel(label)
-
-        _plot_sign(ax_sgn, classified_a["sign_R"].values, "sign_R")
-        ax_sgn.step(tnum, classified_a["sign_G"].values + 0.05, where="mid")
-        ax_sgn.step(tnum, classified_a["sign_B"].values - 0.05, where="mid")
-
-        ax_sgn.legend(
-            ["sign_R", "sign_G (+0.05)", "sign_B (-0.05)"],
-            frameon=False,
-            loc="upper right",
+        im = ax_hm.imshow(
+            S,
+            aspect="auto",
+            interpolation="nearest",
+            cmap=plt.get_cmap(heatmap_cmap, 3),
+            vmin=-1,
+            vmax=1,
+            extent=[tnum[0], tnum[-1], -0.5, 2.5],
+            origin="lower",
         )
-        ax_sgn.set_title("(c) Signs vs time")
-        ax_sgn.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
-        # ------------------------------------------------------------------
-        # (d) Strength vs time
-        # ------------------------------------------------------------------
-        strength = classified_a["strength"].values
-        ax_str.plot(tnum, strength, lw=2)
+        ax_hm.set_title("(b) Signs heatmap (−1 / 0 / +1)", fontsize=title_fs)
+        ax_hm.set_yticks([0, 1, 2])
+        ax_hm.set_yticklabels(row_labels, fontsize=tick_fs)
+        ax_hm.set_ylabel("RGB component", fontsize=label_fs)
+        ax_hm.tick_params(labelsize=tick_fs)
 
-        thr = classified_a.attrs.get("min_strength", None)
-        if thr is not None:
-            ax_str.axhline(float(thr), ls="--", lw=1)
+        cb2 = fig.colorbar(im, cax=cax_hm)
+        cb2.set_label("sign", fontsize=label_fs)
+        cb2.set_ticks([-1, 0, 1])
+        cb2.set_ticklabels(["−1", "0", "+1"])
+        cax_hm.tick_params(labelsize=tick_fs)
 
-        ax_str.set_title("(d) Strength")
-        ax_str.set_ylabel("strength")
-        ax_str.set_xlabel("Time")
-        ax_str.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-
-        ax_sgn.set_xlim(tnum.min(), tnum.max())
-        ax_str.set_xlim(tnum.min(), tnum.max())
-
-        fig.tight_layout()
+        # Shared X axis
+        ax_hm.xaxis_date()
+        ax_hm.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        ax_hm.set_xlabel("Time", fontsize=label_fs)
 
         # ------------------------------------------------------------------
         # Save
@@ -2991,13 +3024,185 @@ class MRRProData:
             outdir = Path.cwd() if output_dir is None else Path(output_dir)
             outdir.mkdir(parents=True, exist_ok=True)
 
-            t0s = analysis_a.attrs.get("period_start", "").replace(":", "")
-            t1s = analysis_a.attrs.get("period_end", "").replace(":", "")
-            layer_tag = "layer"
-            if "z_top" in analysis_a.attrs and "z_base" in analysis_a.attrs:
-                layer_tag = f"{analysis_a.attrs['z_top']:.0f}-{analysis_a.attrs['z_base']:.0f}m"
+            t0s = np.datetime_as_string(t[0], unit="s").replace(":", "")
+            t1s = np.datetime_as_string(t[-1], unit="s").replace(":", "")
 
-            filepath = outdir / f"{t0s}_{t1s}_microphysics_summary_{layer_tag}_k{k}.png"
-            fig.savefig(filepath, dpi=dpi)
+            if analysis is not None:
+                z_top = analysis.attrs.get("z_top", "zt")
+                z_base = analysis.attrs.get("z_base", "zb")
+            else:
+                z_top = classified.attrs.get("z_top", "zt")
+                z_base = classified.attrs.get("z_base", "zb")
+
+            filepath = outdir / f"processes_evolution_{z_top}-{z_base}_{t0s}-{t1s}.png"
+            fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
         return fig, filepath
+
+    def plot_classified_processes_on_hexagram(
+        self,
+        *,
+        classified: xr.Dataset,
+        analysis: xr.Dataset | None = None,
+        show_background: bool = False,
+        show_process_masks: bool = True,
+        savefig: bool = False,
+        output_dir: Path | None = None,
+        **kwargs,
+    ) -> tuple[Figure, Path | None]:
+        """
+        Plot classified time samples on the RGB hexagram.
+
+        Parameters
+        ----------
+        classified : xr.Dataset
+            Output of classify_rain_process(...). Must contain:
+            - proc_label
+            - hex_x, hex_y
+        analysis : xr.Dataset | None
+            Optional analysis dataset. Used to retrieve k if not present in classified.attrs.
+        show_background : bool
+            If True, show full RGB hexagram background.
+        show_process_masks : bool
+            If True, overlay theoretical mask of each process from PROCESS_SIGNATURES.
+        """
+                
+        pcfg = self.plot_cfg
+        figsize = kwargs.get("figsize", pcfg.figsize_hex)
+        dpi = kwargs.get("dpi", pcfg.dpi)
+        alpha_hexagram = kwargs.get("alpha_hexagram", pcfg.alpha_hexagram)
+        alpha_mask = kwargs.get("alpha_mask", 0.18)
+        markersize = kwargs.get("markersize", 35.0)
+
+
+        if not isinstance(classified, xr.Dataset):
+            raise TypeError("classified must be an xr.Dataset.")
+
+        for v in ("proc_label", "hex_x", "hex_y"):
+            if v not in classified:
+                raise KeyError(f"classified must contain '{v}'.")
+
+        # k from attrs
+        k = classified.attrs.get("k", None)
+        if k is None and analysis is not None:
+            k = analysis.attrs.get("k", None)
+        if k is None:
+            raise KeyError("k not found in classified.attrs nor analysis.attrs.")
+
+        hex_assets = get_hexagram_assets(k=k)
+        img = np.asarray(hex_assets["img"], float)
+
+        # fixed colors per process
+        process_colors = kwargs.get(
+            "process_colors",
+            {
+                "breakup": "#d95f02",
+                "coalescence": "#1b9e77",
+                "evaporation": "#7570b3",
+                "growth": "#e7298a",
+                "activation": "#66a61e",
+                "steady_or_weak": "#bdbdbd",
+                "unknown": "#666666",
+                "no_data": "#d9d9d9",
+            },
+        )
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        if show_background:
+            ax.imshow(
+                img,
+                origin="lower",
+                interpolation="nearest",
+                alpha=alpha_hexagram,
+            )
+
+        # Optional: overlay theoretical masks
+        if show_process_masks:
+            for proc in PROCESS_SIGNATURES:
+                mask2d, _ = get_process_hexagram_mask(
+                    proc,
+                    k=k,
+                    tol_center=classified.attrs['tol_center'],
+                )
+
+                color = process_colors.get(proc, "#000000")
+                rgba = np.zeros((*mask2d.shape, 4), dtype=float)
+                rgb = plt.matplotlib.colors.to_rgb(color)
+                rgba[mask2d, 0] = rgb[0]
+                rgba[mask2d, 1] = rgb[1]
+                rgba[mask2d, 2] = rgb[2]
+                rgba[mask2d, 3] = alpha_mask
+
+                ax.imshow(
+                    rgba,
+                    origin="lower",
+                    interpolation="nearest",
+                )
+
+        # Scatter observed classified points
+        hx = classified["hex_x"].values.astype(float)
+        hy = classified["hex_y"].values.astype(float)
+        labels = classified["proc_label"].values.astype(str)
+
+        valid = np.isfinite(hx) & np.isfinite(hy) & (hx >= 0) & (hy >= 0)
+
+        present_labels = pd.unique(labels[valid])
+
+        handles = []
+        for lab in present_labels:
+            m = valid & (labels == lab)
+            if not np.any(m):
+                continue
+
+            color = process_colors.get(lab, "#000000")
+            code = PROCESS_CODES.get(lab, lab.upper())
+
+            marker = PROCESS_MARKERS.get(lab, "o")
+            
+            strength = classified["strength"].values.astype(float)
+
+            sc = ax.scatter(
+                hx[m],
+                hy[m],
+                s=markersize,
+                c=strength[m],           # color = strength
+                cmap=kwargs.get("cmap", "viridis"),
+                vmin=0.0,
+                vmax=1.0,
+                marker=marker,
+                edgecolors="black",
+                linewidths=0.3,
+                alpha=0.95,
+                label=PROCESS_CODES.get(lab, lab.upper()),
+            )            
+            handles.append(sc)
+
+        cbar = fig.colorbar(sc, ax=ax)
+        cbar.set_label("strength")
+
+        ax.set_title(f"Classified rain processes on RGB hexagram (k={k})")
+        ax.set_xlabel("hex_x")
+        ax.set_ylabel("hex_y")
+        ax.set_xlim(-0.5, img.shape[1] - 0.5)
+        ax.set_ylim(-0.5, img.shape[0] - 0.5)
+        ax.set_aspect("equal")
+        ax.grid(False)
+
+        if handles:
+            ax.legend(loc="upper right", frameon=True)
+
+        fig.tight_layout()
+        filepath = None
+        if savefig:
+            output_dir = Path.cwd() if output_dir is None else Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            t0 = classified["time"].values[0]
+            t1 = classified["time"].values[-1]
+            t0s = np.datetime_as_string(t0, unit="s").replace(":", "")
+            t1s = np.datetime_as_string(t1, unit="s").replace(":", "")
+            filepath = output_dir / f"classified_processes_hexagram_{t0s}_{t1s}_k{k}.png"
+            fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
+
+        return fig, filepath        

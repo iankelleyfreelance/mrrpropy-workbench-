@@ -1,8 +1,108 @@
-# generate_rgb_hex.py
-import numpy as np
+from pathlib import Path
 import csv
 
-def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d.csv", b_file="bw_hex_test_d.csv", n_file="nw_hex_test_d.csv"):
+import numpy as np
+import xarray as xr
+import matplotlib.pyplot as plt
+
+
+# ============================================================
+# Tabla de procesos: signos sobre [Dm, Nw, LWC] = [R, G, B]
+# -1 = banda baja
+#  0 = banda central
+# +1 = banda alta
+# ============================================================
+PROCESS_SIGNATURES = {
+    "breakup":      [(-1, +1,  0)],   # Dm↓, Nw↑, LWC≈const
+    "coalescence":  [(+1, -1,  0)],   # Dm↑, Nw↓, LWC≈const
+    "evaporation":  [(-1, -1, -1), (-1, -1,  0), (-1, 0, -1)],   # Dm↓, Nw↓, LWC↓
+    "growth":       [(+1,  0, +1)],   # Dm↑, Nw≈const, LWC↑
+    "activation":   [(+1, +1, +1), (0,+1,+1)],   # Dm↑, Nw↑, LWC↑
+}
+
+PROCESS_CODES = {
+    'unknown': 'UNKNOWN',
+    'steady_or_weak': 'STEADY',
+    'breakup': 'BREAKUP',
+    'coalescence': 'COAL.',
+    'evaporation': 'EVAP.',
+    'growth': 'GROWTH',
+    'activation': 'ACTIV.'
+}
+
+PROCESS_MARKERS = {
+    "breakup": "o",          # círculo
+    "coalescence": "s",      # cuadrado
+    "evaporation": "v",      # triángulo abajo
+    "growth": "^",           # triángulo arriba
+    "activation": "D",       # diamante
+    "steady_or_weak": "P",   # plus filled
+    "unknown": "X",          # X
+    "no_data": ".",          # punto pequeño
+}
+
+def build_rgb_from_trends(
+    ds: xr.Dataset,
+    *,
+    time_dim: str = "time",
+    vars: tuple[str, str, str] = ("b_Dm", "b_Nw", "b_LWC"),
+    q: float = 0.02,
+    per_hour: bool = False,
+) -> xr.Dataset:
+    """
+    Convierte tres series (con signo) a canales RGB en [0,1], con 0.5 = 0.
+    Normalización robusta por cuantiles simétricos.
+
+    vars: nombres en ds para (R,G,B) en ese orden.
+    q: cuantil para escala robusta (ej. 0.02 => recorta 2% extremos).
+    per_hour: si True, calcula la escala por cada instante (solo tiene sentido si ds tiene sub-sampling dentro de la hora;
+              si cada fichero es 1 hora con múltiples timestamps, funcionará; si es 1 timestamp/hora, per_hour no aporta).
+    """
+    vR = ds[vars[0]].values.astype(float)
+    vG = ds[vars[1]].values.astype(float)
+    vB = ds[vars[2]].values.astype(float)
+
+    def _scale_global(v):
+        vv = v[np.isfinite(v)]
+        if vv.size == 0:
+            return np.nan
+        lo = np.quantile(vv, q)
+        hi = np.quantile(vv, 1 - q)
+        s = max(abs(lo), abs(hi))
+        return float(s) if s > 0 else 0.0
+
+    def _to_unit(v, s):
+        if not np.isfinite(s) or s <= 0:
+            # si no hay escala (todo ~0), devolvemos 0.5 cuando v es finito, NaN si no
+            out = np.full_like(v, np.nan, dtype=float)
+            out[np.isfinite(v)] = 0.5
+            return out
+        x = np.clip(v / s, -1.0, 1.0)
+        return 0.5 * (x + 1.0)
+
+    # En tu caso habitual, per_hour=False (escala global del evento/capa).
+    sR = _scale_global(vR)
+    sG = _scale_global(vG)
+    sB = _scale_global(vB)
+
+    R = _to_unit(vR, sR)
+    G = _to_unit(vG, sG)
+    B = _to_unit(vB, sB)
+
+    out = xr.Dataset(coords={time_dim: ds[time_dim].values})
+    out["R"] = xr.DataArray(R, dims=(time_dim,))
+    out["G"] = xr.DataArray(G, dims=(time_dim,))
+    out["B"] = xr.DataArray(B, dims=(time_dim,))
+
+    out.attrs["q"] = q
+    out.attrs["scale_R"] = sR
+    out.attrs["scale_G"] = sG
+    out.attrs["scale_B"] = sB
+    out.attrs["source_vars"] = ",".join(vars)
+    return out
+
+
+def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d.csv", b_file="bw_hex_test_d.csv", n_file="nw_hex_test_d.csv"):
     m = k * 2 + 1
     Q = m * 2 + 1
     N = 4 * m + 4  # Q + 2*(m+1)
@@ -171,12 +271,12 @@ def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d
                     set_cell(y, x, value)
 
     # Save to CSV
-    with open(r_file, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        for i in range(N):
-            writer.writerow(r_hex[:, i].T)
+    if save:
+        with open(r_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for i in range(N):
+                writer.writerow(r_hex[:, i].T)
     r_hex = r_hex.T
-
     
     # main loop of g_hex
     for t in range(1, 2 * m + 2):
@@ -315,130 +415,14 @@ def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d
                     set_val(ix, iy, val)
                 p += 1
     
-    ##########
-    #for t in range(1, 2 * m + 2):
-    #    for i in range(1, 7):
-    #        for j in range(1, t + 1):
-    #            # index in each step
-    #            if i == 1:  # R->Y
-    #                y, x = c - (j - 1), c + t
-    #                rgb_grid[y, x] = p
-    #                p += 1
-    #                if t <= k:
-    #                    g_hex[y, x] = (k + 1 - t + (j - 1)) / (k + 1)
-    #                elif t <= m:
-    #                    if j == 1:
-    #                        g_hex[y, x] = (k + 2 - (t - k)) / ((k + 1) * (t + 1))
-    #                    else:
-    #                        g_hex[y, x] = ((m - (t - 1)) / (m - k)) * (j - 1) / t
-    #                elif t == m + 1 or j == 1:
-    #                    g_hex[y, x] = 0.0
-    #                elif 1 < j <= 2 * m + 3 - t - 1:
-    #                    if Q - t > k:
-    #                        g_hex[y, x] = (j - 1) * (k + 1 - (m + 2 + k - t)) / ((k + 1) * (2 * m + 2 - t))
-    #                    else:
-    #                        g_hex[y, x] = (k - (Q - t) + j - 1) / (k + 1)
-    #
-    #            elif i == 2:  # Y->G
-    #                y, x = c - t, c + t - (j - 1)
-    #                rgb_grid[y, x] = p
-    #                p += 1
-    #                if t <= k + 1:
-    #                    g_hex[y, x] = 1.0
-    #                elif t < m + 1:
-    #                    g_hex[y, x] = (m - (t - 1)) / (m - k)
-    #                elif t == m + 1:
-    #                    g_hex[y, x] = 0.0
-    #                elif j >= 2 * (t - m):
-    #                    tt = (t - (m + 1)) / (k + 1)
-    #                    g_hex[y, x] = min(tt, 1.0)
-    #
-    #            elif i == 3:  # G->C
-    #                y, x = c - t + (j - 1), c - (j - 1)
-    #                rgb_grid[y, x] = p
-    #                p += 1
-    #                if t <= k + 1:
-    #                    g_hex[y, x] = 1.0
-    #                elif t < m + 1:
-    #                    g_hex[y, x] = (m - (t - 1)) / (m - k)
-    #                elif t == m + 1:
-    #                    g_hex[y, x] = 0.0
-    #                elif j == 1:
-    #                    if t <= m + k + 1:
-    #                        g_hex[y, x] = (t - (m + 1)) / ((k + 1) * (Q - t + 1))
-    #                    else:
-    #                        g_hex[y, x] = (t - (m + k + 1)) / (k + 1)
-    #                elif t - m + 1 <= j <= m + 1:
-    #                    tt = -1.0 * (m - (t - 1)) / (m - k)
-    #                    g_hex[y, x] = min(tt, 1.0)
-    #
-    #            elif i == 4:  # C->B
-    #                y, x = c + (j - 1), c - t
-    #                rgb_grid[y, x] = p
-    #                p += 1
-    #                if t <= k + 1:
-    #                    g_hex[y, x] = (k + 1 - (j - 1)) / (k + 1)
-    #                elif t < m + 1:
-    #                    g_hex[y, x] = ((m - (t - 1)) / (m - k)) * (t - (j - 1)) / t
-    #                elif t == m + 1:
-    #                    g_hex[y, x] = 0.0
-    #                elif 1 < j <= 2 * (m + 1) - t:
-    #                    if Q - t >= k:
-    #                        jt = 2 * (m + 1) + 1 - t - j
-    #                        if jt > 0:
-    #                            g_hex[y, x] = jt * (t - (m + 1)) / ((k + 1) * (m - (t - (m + 2))))
-    #                        else:
-    #                            g_hex[y, x] = (t - 1 - (m + 1)) / ((k + 1) * (m - (t - 1 - (m + 2))))
-    #                    else:
-    #                        jt = 2 * (m + 1) + 1 - t - j
-    #                        g_hex[y, x] = (k + 1 - (j - 1)) / (k + 1)
-    #
-    #            elif i == 5:  # B->M
-#   #                 y, x = c + t, c - t + (j - 1)
-#   #                 rgb_grid[y, x] = p
-#   #                 p += 1
-#   #                 if t < k + 1:
-#   #                     g_hex[y, x] = (k + 1 - t) / (m - k)
-#   #                 elif t < m + 1:
-#   #                     g_hex[y, x] = (k + 1 - (t - k)) / ((k + 1) * (t + 1))
-#   #                 elif t == m + 1 or j == 1:
-#   #                     g_hex[y, x] = 0.0
-#   #                 elif j >= 2 * (t - m):
-#   #                     g_hex[y, x] = 0.0
-#   #             elif i == 5:
-    #                if t <= k + 1:
-    #                    g_hex[y, x] = 2.0 #1.0
-    #                elif t < m + 1:
-    #                    g_hex[y, x] = 3.0 #float(m - (t - 1)) / (m - k)
-    #                elif t == m + 1:
-    #                    g_hex[y, x] = 0.0 #0.0
-    #                elif j == 1:
-    #                    if t <= m + k + 1:
-    #                        g_hex[y, x] = 5.0 #float(t - (m + 1)) / ((k + 1) * (Q - t + 1))
-    #                    else:
-    #                        g_hex[y, x] = 6.0 #float(t - (m + k + 1)) / (k + 1)
-    #                elif j >= 2 * (t - m):
-    #                    print("test:",i,j)
-    #                    tt = float(t - (m + 1)) / (k + 1)
-    #                    g_hex[y, x] = tt if tt <= 1.0 else 1.0
-    #
-    #            elif i == 6:  # M->R
-    #                y, x = c + t - (j - 1), c + (j - 1)
-    #                rgb_grid[y, x] = p
-    #                p += 1
-    #                if t < k + 1:
-    #                    g_hex[y, x] = (k + 1 - t) / (m - k)
-    #                elif t < m + 1:
-    #                    g_hex[y, x] = (k + 2 - (t - k)) / ((k + 1) * (t + 1))
-    #                elif t == m + 1:
-    #                    g_hex[y, x] = 0.0
     
     # Save to CSV
     g_hex = g_hex.T
-    with open(g_file, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        for i in range(N):
-            writer.writerow(g_hex[:, i])
+    if  save:
+        with open(g_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for i in range(N):
+                writer.writerow(g_hex[:, i])
     g_hex = g_hex.T                 
     
     # main loop of b_hex
@@ -545,10 +529,11 @@ def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d
                     b_hex[x, y] = val
     
     # Save to CSV
-    with open(b_file, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        for i in range(N):
-            writer.writerow(b_hex[:, i])
+    if save:
+        with open(b_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for i in range(N):
+                writer.writerow(b_hex[:, i])
     b_hex = b_hex.T
             
     # main loop of num
@@ -661,15 +646,14 @@ def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d
                             tj = 2 * m + 2 - t
                             num_hex[y, x] = 12.0/256.0
                         else:
-                            num_hex[y, x] = 12.0/256.0
-                        
-                   
+                            num_hex[y, x] = 12.0/256.0                  
                     
     # Save to CSV
-    with open(n_file, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        for i in range(N):
-            writer.writerow(num_hex[:, i])
+    if save:
+        with open(n_file, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for i in range(N):
+                writer.writerow(num_hex[:, i])
     num_hex = num_hex.T
 
     print("rgb_hex shape:",g_hex.shape)
@@ -677,3 +661,314 @@ def generate_rgb_hex(k: float, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d
     print("output_filename-> r_file:",r_file,", g_file:",g_file,", b_file:",b_file,"n_file",n_file)
     
     return r_hex, g_hex, b_hex, num_hex
+
+
+def get_hexagram_assets(k: int, valid_threshold: float = -0.5):
+    r_hex, g_hex, b_hex, num_hex = generate_rgb_hex(k=k)
+
+    r = np.asarray(r_hex, float)
+    g = np.asarray(g_hex, float)
+    b = np.asarray(b_hex, float)
+    n = np.asarray(num_hex)
+
+    valid = (r > valid_threshold) & (g > valid_threshold) & (b > valid_threshold)
+    ys, xs = np.where(valid)
+
+    # LUT para mapping
+    rgb_cells = np.stack([r[ys, xs], g[ys, xs], b[ys, xs]], axis=1)
+    yx_cells = np.stack([ys, xs], axis=1)
+
+    if np.nanmax(n[ys, xs]) <= 1.0:
+        area_cells = np.rint(n[ys, xs] * 256).astype(int)
+    else:
+        area_cells = np.rint(n[ys, xs]).astype(int)
+
+    # Imagen para plotting
+    img = np.ones((r.shape[0], r.shape[1], 3))
+    img[valid, 0] = r[valid]
+    img[valid, 1] = g[valid]
+    img[valid, 2] = b[valid]
+
+    return {
+        "k": k,
+        "img": img,
+        "rgb_cells": rgb_cells,
+        "yx_cells": yx_cells,
+        "area_cells": area_cells,
+    }
+
+
+def map_rgb_to_hexagram(rgb: xr.Dataset, *, hex_assets, time_dim="time"):
+    rgb_cells = hex_assets["rgb_cells"]
+    yx_cells = hex_assets["yx_cells"]
+    area_cells = hex_assets["area_cells"]
+
+    P = np.stack(
+        [rgb["R"].values, rgb["G"].values, rgb["B"].values], axis=1
+    )
+
+    N = P.shape[0]
+    yx = np.full((N, 2), -1, int)
+    area = np.full(N, -1, int)
+
+    ok = np.isfinite(P).all(axis=1)
+    if np.any(ok):
+        diff = P[ok][:, None, :] - rgb_cells[None, :, :]
+        idx = np.argmin(np.sum(diff**2, axis=2), axis=1)
+        yx[ok] = yx_cells[idx]
+        area[ok] = area_cells[idx]
+
+    out = xr.Dataset(coords={time_dim: rgb[time_dim]})
+    out["hex_y"] = (time_dim, yx[:, 0])
+    out["hex_x"] = (time_dim, yx[:, 1])
+    out["hex_area"] = (time_dim, area)
+    return out
+
+
+def _component_mask(values: np.ndarray, sign: int, tol_center: float) -> np.ndarray:
+    """
+    Devuelve máscara booleana para una componente RGB según el signo:
+      -1 -> baja     : value < 0.5 - tol_center
+       0 -> central  : |value - 0.5| <= tol_center
+      +1 -> alta     : value > 0.5 + tol_center
+    """
+    if sign == -1:
+        return values < (0.5 - tol_center)
+    if sign == 0:
+        return np.abs(values - 0.5) <= tol_center
+    if sign == +1:
+        return values > (0.5 + tol_center)
+
+    raise ValueError(f"sign debe ser -1, 0 o +1; recibido: {sign}")
+
+
+def get_process_hexagram_mask(
+    process: str,
+    *,
+    k: int,
+    tol_center: float = 0.05,
+    valid_threshold: float = -0.5,
+):
+    """
+    Devuelve la máscara 2D del hexagrama correspondiente a un proceso.
+
+    Esta versión admite que PROCESS_SIGNATURES[process] sea:
+      - una única firma:        (-1, +1, 0)
+      - varias firmas válidas: [(-1, -1, -1), (-1, -1, 0), (-1, 0, -1)]
+
+    Parameters
+    ----------
+    process : str
+        Nombre del proceso ('breakup', 'coalescence', 'evaporation',
+        'growth', 'activation', ...).
+    k : int
+        Parámetro del hexagrama.
+    tol_center : float, optional
+        Tolerancia alrededor de 0.5 para la banda central.
+    valid_threshold : float, optional
+        Umbral que se pasa a get_hexagram_assets.
+
+    Returns
+    -------
+    mask2d : np.ndarray
+        Máscara booleana 2D con True en las celdas del proceso.
+    hex_assets : dict
+        Diccionario devuelto por get_hexagram_assets.
+    """
+    if process not in PROCESS_SIGNATURES:
+        valid = ", ".join(PROCESS_SIGNATURES.keys())
+        raise ValueError(f"Proceso desconocido: {process!r}. Válidos: {valid}")
+
+    if not isinstance(k, int) or k <= 0:
+        raise ValueError("k debe ser un entero positivo.")
+
+    hex_assets = get_hexagram_assets(k=k, valid_threshold=valid_threshold)
+
+    rgb_cells = np.asarray(hex_assets["rgb_cells"], float)
+    yx_cells = np.asarray(hex_assets["yx_cells"], int)
+    img = np.asarray(hex_assets["img"], float)
+
+    if rgb_cells.ndim != 2 or rgb_cells.shape[1] != 3:
+        raise ValueError(
+            f"hex_assets['rgb_cells'] debe tener shape (n, 3), no {rgb_cells.shape}"
+        )
+    if yx_cells.ndim != 2 or yx_cells.shape[1] != 2:
+        raise ValueError(
+            f"hex_assets['yx_cells'] debe tener shape (n, 2), no {yx_cells.shape}"
+        )
+
+    R = rgb_cells[:, 0]
+    G = rgb_cells[:, 1]
+    B = rgb_cells[:, 2]
+
+    sig_def = PROCESS_SIGNATURES[process]
+
+    # Normalizar a lista de firmas [(sR,sG,sB), ...]
+    if isinstance(sig_def, tuple) and len(sig_def) == 3:
+        signatures = [tuple(int(v) for v in sig_def)]
+    elif isinstance(sig_def, (list, tuple)):
+        signatures = []
+        for item in sig_def:
+            if not (isinstance(item, (list, tuple)) and len(item) == 3):
+                raise ValueError(
+                    f"Firma inválida para proceso {process!r}: {item!r}. "
+                    "Cada firma debe ser una tupla/lista de 3 enteros."
+                )
+            signatures.append(tuple(int(v) for v in item))
+    else:
+        raise ValueError(
+            f"PROCESS_SIGNATURES[{process!r}] no tiene un formato válido: {sig_def!r}"
+        )
+
+    mask_total = np.zeros_like(R, dtype=bool)
+
+    for sR, sG, sB in signatures:
+        m = (
+            _component_mask(R, sR, tol_center)
+            & _component_mask(G, sG, tol_center)
+            & _component_mask(B, sB, tol_center)
+        )
+        mask_total |= m
+
+    mask2d = np.zeros(img.shape[:2], dtype=bool)
+    if np.any(mask_total):
+        ys = yx_cells[mask_total, 0]
+        xs = yx_cells[mask_total, 1]
+        mask2d[ys, xs] = True
+
+    return mask2d, hex_assets
+
+def plot_process_to_hexagram(
+    process: str,
+    *,
+    k: int,
+    tol_center: float = 0.05,
+    valid_threshold: float = -0.5,
+    figsize: tuple[float, float] = (8, 8),
+    show_background: bool = True,
+    alpha_hexagram: float = 0.20,
+    alpha_process: float = 0.95,
+    process_color: tuple[float, float, float] | None = None,
+    show_cell_centers: bool = False,
+    title: str | None = None,
+    savefig: bool = False,
+    output_dir: str | Path | None = None,
+    dpi: int = 200,
+) -> tuple[plt.Figure, Path | None] | plt.Figure:
+    """
+    Pinta el espacio del hexagrama correspondiente a un proceso microfísico.
+
+    Parameters
+    ----------
+    process : str
+        Nombre del proceso.
+    k : int
+        Parámetro del hexagrama.
+    tol_center : float, optional
+        Tolerancia de la banda central en RGB.
+    valid_threshold : float, optional
+        Umbral pasado a get_hexagram_assets.
+    figsize : tuple, optional
+        Tamaño de figura.
+    show_background : bool, optional
+        Si True, muestra el hexagrama RGB completo de fondo.
+    alpha_hexagram : float, optional
+        Transparencia del hexagrama de fondo.
+    alpha_process : float, optional
+        Transparencia del overlay del proceso.
+    process_color : tuple or None, optional
+        Color fijo RGB para pintar el proceso. Si es None, se usan los colores
+        reales de cada celda del hexagrama.
+    show_cell_centers : bool, optional
+        Si True, superpone marcadores en los centros de las celdas seleccionadas.
+    title : str or None, optional
+        Título personalizado.
+    savefig : bool, optional
+        Si True, guarda la figura.
+    output_dir : str | Path | None, optional
+        Carpeta de salida si savefig=True.
+    dpi : int, optional
+        Resolución de guardado.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figura creada.
+    filepath : pathlib.Path, optional
+        Solo si savefig=True.
+    """
+    mask2d, hex_assets = get_process_hexagram_mask(
+        process,
+        k=k,
+        tol_center=tol_center,
+        valid_threshold=valid_threshold,
+    )
+    
+    img = np.asarray(hex_assets["img"], float)
+    rgb_cells = np.asarray(hex_assets["rgb_cells"], float)
+    yx_cells = np.asarray(hex_assets["yx_cells"], int)
+
+    ny, nx = img.shape[:2]
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if show_background:
+        ax.imshow(
+            img,
+            origin="lower",
+            interpolation="nearest",
+            alpha=alpha_hexagram,
+        )
+
+    # Overlay RGBA del proceso
+    overlay = np.zeros((ny, nx, 4), dtype=float)
+
+    ys, xs = np.where(mask2d)
+
+    if len(xs) > 0:
+        if process_color is None:
+            # usar color real de la LUT para cada celda
+            lut = {tuple(yx): rgb for yx, rgb in zip(yx_cells, rgb_cells)}
+            for y, x in zip(ys, xs):
+                overlay[y, x, :3] = lut[(y, x)]
+                overlay[y, x, 3] = alpha_process
+        else:
+            overlay[ys, xs, 0] = process_color[0]
+            overlay[ys, xs, 1] = process_color[1]
+            overlay[ys, xs, 2] = process_color[2]
+            overlay[ys, xs, 3] = alpha_process
+
+    ax.imshow(
+        overlay,
+        origin="lower",
+        interpolation="nearest",
+    )
+
+    if show_cell_centers and len(xs) > 0:
+        ax.scatter(xs, ys, s=8, c="k", alpha=0.6)
+
+    if title is None:
+        title = f"Hexagram space for process: {process} (k={k}, tol_center={tol_center:.3f})"
+    ax.set_title(title)
+
+    ax.set_xlabel("hex_x")
+    ax.set_ylabel("hex_y")
+    ax.set_xlim(-0.5, nx - 0.5)
+    ax.set_ylim(-0.5, ny - 0.5)
+    ax.set_aspect("equal")
+    ax.grid(False)
+
+    fig.tight_layout()
+
+    filepath = None
+    if savefig:
+        output_dir = Path.cwd() if output_dir is None else Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_process = process.replace(" ", "_")
+        safe_tol = str(tol_center).replace(".", "p")
+        filepath = output_dir / f"hexagram_process_{safe_process}_k{k}_tol{safe_tol}.png"
+        fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
+
+    return (fig, filepath) if savefig else fig
+

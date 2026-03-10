@@ -37,7 +37,7 @@ def test_quickplot_reflectivity_runs(mrr):
     pytest.importorskip("matplotlib")
 
     variable = 'Ze'
-    fig, ax = mrr.quicklook(variable=variable)
+    fig, ax = mrr.quicklook(variable=variable, source='raw')
     fig.savefig(OUTPUT_DIR / f'test_quickplot_{variable}.png')  # Guardar la figura para inspección manual si se desea
     # Comprobación mínima de que devuelve objetos figura y ejes
     assert isinstance(fig, Figure)
