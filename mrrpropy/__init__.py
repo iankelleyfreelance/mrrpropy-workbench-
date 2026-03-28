@@ -1,17 +1,21 @@
+"""
+Top-level package for `mrrpropy`.
+
+The project provides:
+
+- a high-level `MRRProData` API for loading, processing and plotting METEK MRR-PRO
+  datasets,
+- the published RaProMPro scientific processing implementation,
+- utilities for microphysical process analysis and hexagram-based classification.
+
+The public API is intentionally concentrated around `mrrpropy.raw_class.MRRProData`.
+The lower-level `RaProMPro_*` modules are retained mainly for scientific reference and
+workflow-controlled optimization work.
+"""
+
 from pathlib import Path
 
-# GET PACKAGE DIRECTORY
-MRRPRO_DIR = Path.cwd() / "mrrpropry"
-
-# __all__ = []
+PACKAGE_DIR = Path(__file__).resolve().parent
 __version__ = "0.0.1"
 
-__doc__ = f"""
-# What is mrrpro?
-A python package for MRR PRO analysis and processing {__version__}.
-
-# Installation
-You can use mrrpro either you could use the API (functions) only or maybe prefer to modify the source code. The second option requires aditional configuration.
-The following are common requirements.
-- Python 3.8+
-"""
+__all__ = ["PACKAGE_DIR", "__version__"]

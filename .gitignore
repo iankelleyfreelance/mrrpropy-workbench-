@@ -2,9 +2,6 @@
 __pycache__/
 *.py[codz]
 *$py.class
-*.csv
-*.png 
-
 
 # C extensions
 *.so
@@ -52,16 +49,18 @@ coverage.xml
 *.py.cover
 .hypothesis/
 .pytest_cache/
+.black-cache/
 cover/
 
 #Folder tests
 tests/__pycache__/
 tests/.pytest_cache/
-tests/**/*.png
-tests/data/**/2025/10/**/*.nc
-tests/data/PRODUCTS/**/*.nc
-tests/figures/**/*.png
+tests/figures/
+tests/figures/**
+tests/generated/
+tests/generated/**
 tests/**/gaia*.py
+test_quickplot_*.png
 
 # Translations
 *.mo

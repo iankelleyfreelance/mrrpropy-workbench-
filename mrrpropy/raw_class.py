@@ -1,10 +1,13 @@
+"""High-level API for MRR-PRO data access, processing and plotting."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Union
+from typing import Any, Iterable, List, Optional, Union
 
 from matplotlib import pyplot as plt
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 import matplotlib.colors as mcolors
 import matplotlib.dates as mdates
@@ -14,7 +17,8 @@ import pandas as pd
 import xarray as xr
 from datetime import datetime
 
-import mrrpropy.RaProMPro_original as rpm
+import mrrpropy.RaProMPro_original as rpm_original
+import mrrpropy.RaProMPro_optimized as rpm_optimized
 from mrrpropy.utils import (
     ols_slope_intercept_r2,
     compute_eps )
@@ -61,7 +65,7 @@ class PlotConfig:
     figsize: tuple[float, float] = (10, 10)
     figsize_hex: tuple[float, float] = (10, 10)
     figsize_summary: tuple[float, float] = (14, 10)
-    figsize_quicklook: tuple[float, float] = (12, 8)
+    figsize_quicklook: tuple[float, float] = (16, 8)
     figsize_spectrogram: tuple[float, float] = (10, 14)
     figsize_profiles: tuple[float, float] = (14, 10)
     figsize_multipanel: tuple[float, float] = (14, 10) 
@@ -95,9 +99,11 @@ class MRRProData:
     micro_cfg: MicrophysicsConfig = field(default_factory=MicrophysicsConfig)
     plot_cfg: PlotConfig = field(default_factory=PlotConfig)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.path = Path(self.path)
         self.raprompro: xr.Dataset | None = None
+        self.raprompro_original: xr.Dataset | None = None
+        self.raprompro_optimized: xr.Dataset | None = None
 
     # -------------------------
     # Constructors
@@ -114,7 +120,7 @@ class MRRProData:
     # Basic Properties
     # -------------------------
     @property
-    def time(self):
+    def time(self) -> pd.DatetimeIndex:
         """Time index as pandas DatetimeIndex."""
         return self.ds["time"].to_index()
 
@@ -270,12 +276,72 @@ class MRRProData:
 
     def process_raprompro(
         self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> xr.Dataset:
+        """
+        Backward-compatible entry point that currently delegates to the original
+        wrapper implementation.
+        """
+        return self.process_raprompro_original(*args, **kwargs)
+
+    def process_raprompro_original(
+        self,
         *,
         adjust_m: float = 1.0,
         save_spe_3d: bool = False,
         save_dsd_3d: bool = False,
         save: bool = False,
         **kwargs,
+    ) -> xr.Dataset:
+        """
+        Reference wrapper around the published RaProM-Pro implementation.
+        """
+        out = self._process_raprompro_impl(
+            cache_attr="raprompro_original",
+            rpm_module=rpm_original,
+            adjust_m=adjust_m,
+            save_spe_3d=save_spe_3d,
+            save_dsd_3d=save_dsd_3d,
+            save=save,
+            **kwargs,
+        )
+        self.raprompro = out
+        return out
+
+    def process_raprompro_optimized(
+        self,
+        *,
+        adjust_m: float = 1.0,
+        save_spe_3d: bool = False,
+        save_dsd_3d: bool = False,
+        save: bool = False,
+        **kwargs,
+    ) -> xr.Dataset:
+        """
+        Placeholder for an optimized wrapper path. It intentionally shares the
+        current scientific implementation until optimizations are introduced.
+        """
+        return self._process_raprompro_impl(
+            cache_attr="raprompro_optimized",
+            rpm_module=rpm_optimized,
+            adjust_m=adjust_m,
+            save_spe_3d=save_spe_3d,
+            save_dsd_3d=save_dsd_3d,
+            save=save,
+            **kwargs,
+        )
+
+    def _process_raprompro_impl(
+        self,
+        *,
+        cache_attr: str,
+        rpm_module: Any,
+        adjust_m: float = 1.0,
+        save_spe_3d: bool = False,
+        save_dsd_3d: bool = False,
+        save: bool = False,
+        **kwargs: Any,
     ) -> xr.Dataset:
         """
         Run RaProM-Pro processing using the published CLI algorithm implementation
@@ -285,10 +351,13 @@ class MRRProData:
         the original CLI output (Type, W, spectral width, Skewness, Kurtosis, DBPIA,
         LWC, RR, SR, Za, Z, Zea, Ze, Z_all, ... and BB_*).
         """
-        if self.raprompro is not None:
-            return self.raprompro
+        cached = getattr(self, cache_attr)
+        if cached is not None:
+            return cached
 
         ds = self.ds
+        rpm = rpm_module
+        use_preallocated_accumulators = cache_attr == "raprompro_optimized"
 
         # -------------------------
         # 0) Validate minimal inputs
@@ -407,6 +476,18 @@ class MRRProData:
         idx_map = ds["index_spectra"].values  # (time, range) -> n_spectra index
         # Safety: NaNs exist; coerce invalid to 0 and treat as missing later
         idx_map_int = np.where(np.isfinite(idx_map), idx_map, 0).astype(int)
+        n_spectra = ds.sizes["n_spectra"]
+
+        raw_spectra_np = None
+        ref_spectra_np = None
+        snr_np = None
+        if use_preallocated_accumulators:
+            if has_raw:
+                raw_spectra_np = ds["spectrum_raw"].values
+            if has_ref:
+                ref_spectra_np = ds["spectrum_reflectivity"].values
+            if "SNR" in ds:
+                snr_np = ds["SNR"].values.astype(float)
 
         def _spectra_db_at_time(it: int, varname: str) -> np.ndarray:
             """
@@ -414,16 +495,28 @@ class MRRProData:
             Implemented as a loop to keep semantics explicit (matches CLI structure).
             """
             out = np.full((Nhei, Nbins), np.nan, dtype=float)
+            if use_preallocated_accumulators:
+                source = raw_spectra_np if varname == "spectrum_raw" else ref_spectra_np
+                if source is None:
+                    return out
+                spec_idx = idx_map_int[it, :]
+                valid = (spec_idx >= 0) & (spec_idx < n_spectra)
+                if np.any(valid):
+                    out[valid, :] = source[it, spec_idx[valid], :]
+                return out
+
             for k in range(Nhei):
                 ispec = int(idx_map_int[it, k])
                 # If index_spectra is invalid, skip
-                if ispec < 0 or ispec >= ds.sizes["n_spectra"]:
+                if ispec < 0 or ispec >= n_spectra:
                     continue
                 out[k, :] = ds[varname].isel(time=it, n_spectra=ispec).values
             return out
 
         # SNR for spectrum_reflectivity mode (original passes Snr_Refl_2)
         def _snr_at_time(it: int) -> np.ndarray:
+            if snr_np is not None:
+                return snr_np[it, :]
             if "SNR" not in ds:
                 return np.full(Nhei, np.nan, dtype=float)
             return ds["SNR"].isel(time=it).values.astype(float)
@@ -437,35 +530,65 @@ class MRRProData:
         # -------------------------
         # 5) Main loop (mirrors CLI)
         # -------------------------
+        ntime = ds.sizes["time"]
         bb_bot_full: list[float] = []
         bb_top_full: list[float] = []
         bb_peak_full: list[float] = []
 
         # Full matrices (time, range)
-        estat_full = None
-        sk_full = None
-        kur_full = None
-        PIA_full = None
-        w_full = None
-        sig_full = None
-        LWC_full = None
-        RR_full = None
-        SnowR_full = None
-        Z_da_full = None
-        Z_a_full = None
-        Z_ea_full = None
-        Z_e_full = None
-        z_all_full = None
-        lwc_all_full = None
-        rr_all_full = None
-        n_all_full = None
-        nw_full = None
-        dm_full = None
-        NW_all_full = None
-        DM_all_full = None
-        Noi_full = None
-        SNR_full = None
-        N_da_full = None
+        if use_preallocated_accumulators:
+            def _empty_2d() -> np.ndarray:
+                return np.full((ntime, Nhei), np.nan, dtype=float)
+
+            estat_full = _empty_2d()
+            sk_full = _empty_2d()
+            kur_full = _empty_2d()
+            PIA_full = _empty_2d()
+            w_full = _empty_2d()
+            sig_full = _empty_2d()
+            LWC_full = _empty_2d()
+            RR_full = _empty_2d()
+            SnowR_full = _empty_2d()
+            Z_da_full = _empty_2d()
+            Z_a_full = _empty_2d()
+            Z_ea_full = _empty_2d()
+            Z_e_full = _empty_2d()
+            z_all_full = _empty_2d()
+            lwc_all_full = _empty_2d()
+            rr_all_full = _empty_2d()
+            n_all_full = _empty_2d()
+            nw_full = _empty_2d()
+            dm_full = _empty_2d()
+            NW_all_full = _empty_2d()
+            DM_all_full = _empty_2d()
+            Noi_full = _empty_2d()
+            SNR_full = _empty_2d()
+            N_da_full = _empty_2d()
+        else:
+            estat_full = None
+            sk_full = None
+            kur_full = None
+            PIA_full = None
+            w_full = None
+            sig_full = None
+            LWC_full = None
+            RR_full = None
+            SnowR_full = None
+            Z_da_full = None
+            Z_a_full = None
+            Z_ea_full = None
+            Z_e_full = None
+            z_all_full = None
+            lwc_all_full = None
+            rr_all_full = None
+            n_all_full = None
+            nw_full = None
+            dm_full = None
+            NW_all_full = None
+            DM_all_full = None
+            Noi_full = None
+            SNR_full = None
+            N_da_full = None
 
         # precipitation-type bookkeeping for PrepType (optional)
         Nw_2 = []
@@ -479,36 +602,59 @@ class MRRProData:
             []
         )  # (time, range, DropSize) in original; we store log10(NdE) if requested
 
-        for it in range(ds.sizes["time"]):
-            NewNoise = []
-            Pot = []
+        for it in range(ntime):
+            if use_preallocated_accumulators:
+                nan_row = np.full(Nbins, np.nan, dtype=float)
+                NewNoise = [np.nan] * Nhei
+                Pot = [nan_row.copy() for _ in range(Nhei)]
+            else:
+                NewNoise = []
+                Pot = []
 
             if Code_spectrum == 0:
                 raw_db = _spectra_db_at_time(it, "spectrum_raw")  # (range, bins)
                 # Loop over ranges exactly as CLI
                 for k in range(Nhei):
-                    COL_db = np.asarray(raw_db[k, :], dtype=float)
+                    COL_db = raw_db[k, :] if use_preallocated_accumulators else np.asarray(raw_db[k, :], dtype=float)
                     if np.isnan(COL_db).all():
-                        NewNoise.append(np.nan)
-                        Pot.append(np.full(Nbins, np.nan))
+                        if not use_preallocated_accumulators:
+                            NewNoise.append(np.nan)
+                            Pot.append(np.full(Nbins, np.nan))
                         continue
 
                     COL_lin = np.power(10.0, COL_db / 10.0)
                     COL2, Noise = rpm.MrrProNoise2(COL_lin, k, DeltaH, TimeInt)
+                    denom = FTcolum[k]
 
                     # original: Noise*(k)**2/TF[k] and COL2*(k)**2/TF[k]
-                    NewNoise.append(Noise * (k**2) / FTcolum[k])
-                    Pot.append((COL2 * (k**2)) / FTcolum[k])
+                    if use_preallocated_accumulators:
+                        if not np.isfinite(denom) or denom == 0:
+                            NewNoise[k] = np.nan
+                            Pot[k] = np.full(Nbins, np.nan)
+                        else:
+                            NewNoise[k] = Noise * (k**2) / denom
+                            Pot[k] = (COL2 * (k**2)) / denom
+                    else:
+                        if not np.isfinite(denom) or denom == 0:
+                            NewNoise.append(np.nan)
+                            Pot.append(np.full(Nbins, np.nan))
+                        else:
+                            NewNoise.append(Noise * (k**2) / denom)
+                            Pot.append((COL2 * (k**2)) / denom)
 
                 Snr_Refl_2 = []
             else:
                 ref_db = _spectra_db_at_time(it, "spectrum_reflectivity")
                 for k in range(Nhei):
-                    COL_db = np.asarray(ref_db[k, :], dtype=float)
+                    COL_db = ref_db[k, :] if use_preallocated_accumulators else np.asarray(ref_db[k, :], dtype=float)
                     if np.isnan(COL_db).all():
-                        Pot.append(np.full(Nbins, np.nan))
+                        if not use_preallocated_accumulators:
+                            Pot.append(np.full(Nbins, np.nan))
                     else:
-                        Pot.append(np.power(10.0, COL_db / 10.0))
+                        if use_preallocated_accumulators:
+                            Pot[k] = np.power(10.0, COL_db / 10.0)
+                        else:
+                            Pot.append(np.power(10.0, COL_db / 10.0))
                 Snr_Refl_2 = _snr_at_time(it)
 
             # continuity filter (original)
@@ -559,32 +705,88 @@ class MRRProData:
                 Snr_Refl_2,
             )
 
+            if use_preallocated_accumulators:
+                estat_arr = np.asarray(estat, dtype=float)
+                w_arr = np.asarray(w, dtype=float)
+                sig_arr = np.asarray(sig, dtype=float)
+                sk_arr = np.asarray(sk, dtype=float)
+                Noi_arr = np.asarray(Noi, dtype=float)
+                DSD_arr = np.asarray(DSD, dtype=float)
+                NdE_arr = np.asarray(NdE, dtype=float)
+                Ze_arr = np.asarray(Ze, dtype=float)
+                snr_arr = np.asarray(snr, dtype=float)
+                kur_arr = np.asarray(kur, dtype=float)
+                PiA_arr = np.asarray(PiA, dtype=float)
+                Lwc_arr = np.asarray(Lwc, dtype=float)
+                Rr_arr = np.asarray(Rr, dtype=float)
+                SnowRate_arr = np.asarray(SnowRate, dtype=float)
+                z_da_arr = np.asarray(z_da, dtype=float)
+                Z_all_arr = np.asarray(Z_all, dtype=float)
+                RR_all_arr = np.asarray(RR_all, dtype=float)
+                LWC_all_arr = np.asarray(LWC_all, dtype=float)
+                N_all_arr = np.asarray(N_all, dtype=float)
+                NW_arr = np.asarray(NW, dtype=float)
+                DM_arr = np.asarray(DM, dtype=float)
+                nw_all_arr = np.asarray(nw_all, dtype=float)
+                dm_all_arr = np.asarray(dm_all, dtype=float)
+            else:
+                estat_arr = estat
+                w_arr = w
+                sig_arr = sig
+                sk_arr = sk
+                Noi_arr = Noi
+                DSD_arr = DSD
+                NdE_arr = NdE
+                Ze_arr = Ze
+                snr_arr = snr
+                kur_arr = kur
+                PiA_arr = PiA
+                Lwc_arr = Lwc
+                Rr_arr = Rr
+                SnowRate_arr = SnowRate
+                z_da_arr = z_da
+                Z_all_arr = Z_all
+                RR_all_arr = RR_all
+                LWC_all_arr = LWC_all
+                N_all_arr = N_all
+                NW_arr = NW
+                DM_arr = DM
+                nw_all_arr = nw_all
+                dm_all_arr = dm_all
+
             # BB logic (original uses special handling for first two times)
             if it == 0:
                 bb_bot, bb_top, bb_peak = rpm.BB2(
-                    w,
-                    Ze,
+                    w_arr,
+                    Ze_arr,
                     Hcolum,
-                    sk,
-                    kur,
+                    sk_arr,
+                    kur_arr,
                     np.ones(2) * np.nan,
                     np.ones(2) * np.nan,
                     np.ones(2) * np.nan,
                 )
             elif it == 1:
                 bb_bot, bb_top, bb_peak = rpm.BB2(
-                    w,
-                    Ze,
+                    w_arr,
+                    Ze_arr,
                     Hcolum,
-                    sk,
-                    kur,
+                    sk_arr,
+                    kur_arr,
                     np.ones(2) * bb_bot_full,
                     np.ones(2) * bb_top_full,
                     np.ones(2) * bb_peak_full,
                 )
             else:
                 bb_bot, bb_top, bb_peak = rpm.BB2(
-                    w, Ze, Hcolum, sk, kur, bb_bot_full, bb_top_full, bb_peak_full
+                    w_arr,
+                    Ze_arr,
+                    Hcolum,
+                    sk_arr,
+                    kur_arr,
+                    bb_bot_full,
+                    bb_top_full,
+                    bb_peak_full,
                 )
 
             bb_bot_full.append(bb_bot)
@@ -592,64 +794,95 @@ class MRRProData:
             bb_peak_full.append(bb_peak)
 
             # PIA in dB
-            pIA = 10.0 * np.log10(PiA)
+            pIA = 10.0 * np.log10(PiA_arr)
 
             # Apply PIA only for drizzle/rain exactly as CLI
-            ZeCorrec = []
-            ZaCorrec = []
-            ZaCorrec_all = []
-            for j in range(len(Ze)):
-                ZaCorrec_all.append(Z_all[j] - pIA[j])
-                if estat[j] == 10 or estat[j] == 5:
-                    ZeCorrec.append(Ze[j] - pIA[j])
-                    ZaCorrec.append(z_da[j] - pIA[j])
-                else:
-                    ZeCorrec.append(Ze[j])
-                    ZaCorrec.append(np.nan)
+            if use_preallocated_accumulators:
+                liquid_mask = (estat_arr == 10) | (estat_arr == 5)
+                ZaCorrec_all = Z_all_arr - pIA
+                ZeCorrec = np.where(liquid_mask, Ze_arr - pIA, Ze_arr)
+                ZaCorrec = np.where(liquid_mask, z_da_arr - pIA, np.nan)
+            else:
+                ZeCorrec = []
+                ZaCorrec = []
+                ZaCorrec_all = []
+                for j in range(len(Ze_arr)):
+                    ZaCorrec_all.append(Z_all_arr[j] - pIA[j])
+                    if estat_arr[j] == 10 or estat_arr[j] == 5:
+                        ZeCorrec.append(Ze_arr[j] - pIA[j])
+                        ZaCorrec.append(z_da_arr[j] - pIA[j])
+                    else:
+                        ZeCorrec.append(Ze_arr[j])
+                        ZaCorrec.append(np.nan)
 
             # Collect time-varying “type” params for PrepType (optional)
-            if not np.isnan(DM).all():
-                Nw_2.append(NW)
-                Dm_2.append(DM)
+            if not np.isnan(DM_arr).all():
+                Nw_2.append(NW_arr)
+                Dm_2.append(DM_arr)
 
             # Optional 3D outputs
             if save_spe_3d:
                 spe_3d_list.append(np.asarray(NewMatrix, dtype=float))
             if save_dsd_3d:
-                dsd_3d_list.append(np.log10(np.asarray(NdE, dtype=float)))
+                dsd_3d_list.append(np.log10(NdE_arr))
 
-            # Stack into full matrices (same as CLI)
-            def _stack(prev, cur):
-                cur = np.asarray(cur, dtype=float)
-                return cur if prev is None else np.vstack((prev, cur))
+            if use_preallocated_accumulators:
+                estat_full[it, :] = estat_arr
+                sk_full[it, :] = sk_arr
+                kur_full[it, :] = kur_arr
+                PIA_full[it, :] = np.asarray(pIA, dtype=float)
+                w_full[it, :] = w_arr
+                sig_full[it, :] = sig_arr
+                LWC_full[it, :] = Lwc_arr
+                RR_full[it, :] = Rr_arr
+                SnowR_full[it, :] = SnowRate_arr
+                Z_da_full[it, :] = z_da_arr
+                Z_a_full[it, :] = np.asarray(ZaCorrec, dtype=float)
+                Z_ea_full[it, :] = Ze_arr
+                Z_e_full[it, :] = np.asarray(ZeCorrec, dtype=float)
+                z_all_full[it, :] = np.asarray(ZaCorrec_all, dtype=float)
+                lwc_all_full[it, :] = LWC_all_arr
+                rr_all_full[it, :] = RR_all_arr
+                n_all_full[it, :] = N_all_arr
+                nw_full[it, :] = NW_arr
+                dm_full[it, :] = DM_arr
+                NW_all_full[it, :] = nw_all_arr
+                DM_all_full[it, :] = dm_all_arr
+                Noi_full[it, :] = Noi_arr
+                SNR_full[it, :] = snr_arr
+                N_da_full[it, :] = DSD_arr
+            else:
+                def _stack(prev, cur):
+                    cur = np.asarray(cur, dtype=float)
+                    return cur if prev is None else np.vstack((prev, cur))
 
-            estat_full = _stack(estat_full, estat)
-            sk_full = _stack(sk_full, sk)
-            kur_full = _stack(kur_full, kur)
-            PIA_full = _stack(PIA_full, pIA)
-            w_full = _stack(w_full, w)
-            sig_full = _stack(sig_full, sig)
-            LWC_full = _stack(LWC_full, Lwc)
-            RR_full = _stack(RR_full, Rr)
-            SnowR_full = _stack(SnowR_full, SnowRate)
-            Z_da_full = _stack(Z_da_full, z_da)
-            Z_a_full = _stack(Z_a_full, ZaCorrec)
-            Z_ea_full = _stack(Z_ea_full, Ze)
-            Z_e_full = _stack(Z_e_full, ZeCorrec)
+                estat_full = _stack(estat_full, estat)
+                sk_full = _stack(sk_full, sk)
+                kur_full = _stack(kur_full, kur)
+                PIA_full = _stack(PIA_full, pIA)
+                w_full = _stack(w_full, w)
+                sig_full = _stack(sig_full, sig)
+                LWC_full = _stack(LWC_full, Lwc)
+                RR_full = _stack(RR_full, Rr)
+                SnowR_full = _stack(SnowR_full, SnowRate)
+                Z_da_full = _stack(Z_da_full, z_da)
+                Z_a_full = _stack(Z_a_full, ZaCorrec)
+                Z_ea_full = _stack(Z_ea_full, Ze)
+                Z_e_full = _stack(Z_e_full, ZeCorrec)
 
-            z_all_full = _stack(z_all_full, ZaCorrec_all)
-            lwc_all_full = _stack(lwc_all_full, LWC_all)
-            rr_all_full = _stack(rr_all_full, RR_all)
-            n_all_full = _stack(n_all_full, N_all)
+                z_all_full = _stack(z_all_full, ZaCorrec_all)
+                lwc_all_full = _stack(lwc_all_full, LWC_all)
+                rr_all_full = _stack(rr_all_full, RR_all)
+                n_all_full = _stack(n_all_full, N_all)
 
-            nw_full = _stack(nw_full, NW)
-            dm_full = _stack(dm_full, DM)
-            NW_all_full = _stack(NW_all_full, nw_all)
-            DM_all_full = _stack(DM_all_full, dm_all)
+                nw_full = _stack(nw_full, NW)
+                dm_full = _stack(dm_full, DM)
+                NW_all_full = _stack(NW_all_full, nw_all)
+                DM_all_full = _stack(DM_all_full, dm_all)
 
-            Noi_full = _stack(Noi_full, Noi)
-            SNR_full = _stack(SNR_full, snr)
-            N_da_full = _stack(N_da_full, DSD)
+                Noi_full = _stack(Noi_full, Noi)
+                SNR_full = _stack(SNR_full, snr)
+                N_da_full = _stack(N_da_full, DSD)
 
         # -------------------------
         # 6) Smooth BB and correct values with BB matrix (original)
@@ -898,13 +1131,13 @@ class MRRProData:
                 },
             )
 
-        self.raprompro = out
+        setattr(self, cache_attr, out)
         if save:
             output_dir = kwargs.get("output_dir", Path.cwd())
             filename = kwargs.get("filename", f"{self.path.stem}_raprompro.nc")
             out.to_netcdf(output_dir / filename)
 
-        return self.raprompro
+        return out
 
     def _is_processed(
         self,
@@ -926,7 +1159,7 @@ class MRRProData:
     # -------------------------
     # Resource Management
     # -------------------------
-    def close(self):
+    def close(self) -> None:
         """Close the xarray dataset (e.g., at the end of the script)."""
         self.ds.close()
 
@@ -1191,8 +1424,8 @@ class MRRProData:
         source: str = 'raprompro',
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> tuple[Figure, Axes]:
         """
         Create a time–range plot of reflectivity (or any 2D variable time × range).
 
@@ -1201,7 +1434,7 @@ class MRRProData:
         pcfg = self.plot_cfg  # instancia de PlotConfig
 
         cmap = kwargs.get("cmap", pcfg.cmap)
-        figsize = kwargs.get("figsize", pcfg.figsize)
+        figsize = kwargs.get("figsize", pcfg.figsize_quicklook)
 
         if source == 'raw':
             if variable not in self.ds:            
@@ -2371,7 +2604,7 @@ class MRRProData:
 
                 b_arr[it] = float(b)
                 a_arr[it] = float(a)
-                r2_arr[it] = float(rain_process_analyze)
+                r2_arr[it] = float(r2)
                 F_arr[it] = float(np.exp(b * dz))
 
                 # traceability
@@ -3013,8 +3246,8 @@ class MRRProData:
 
         # Shared X axis
         ax_hm.xaxis_date()
-        ax_hm.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
         ax_hm.set_xlabel("Time", fontsize=label_fs)
+        ax_hm.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
         # ------------------------------------------------------------------
         # Save

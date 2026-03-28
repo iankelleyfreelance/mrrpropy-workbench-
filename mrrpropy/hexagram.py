@@ -1,3 +1,5 @@
+"""Hexagram mapping and classification helpers for rain-process diagnostics."""
+
 from pathlib import Path
 import csv
 

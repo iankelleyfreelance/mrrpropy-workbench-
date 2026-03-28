@@ -16,6 +16,34 @@ import sys
 Nbins, NbinsM, fNy, lamb, K2w = np.nan, np.nan, np.nan, np.nan, np.nan
 SigmaScatt, SigmaExt, speed = np.nan, np.nan, np.nan
 
+def _safe_velocity_sigma(vect, speed):
+    total = np.nansum(vect)
+    if not np.isfinite(total) or total == 0:
+        return np.nan, np.nan, total
+    mean = np.nansum(np.prod([vect, speed], axis=0)) / total
+    sigma = np.sqrt(np.nansum(np.prod([vect, np.power(speed - mean, 2)], axis=0)) / total)
+    return mean, sigma, total
+
+
+def _safe_log10_from_linear(value):
+    if not np.isfinite(value) or value <= 0:
+        return np.nan
+    return 10 * np.log10(value)
+
+
+def _safe_pair_nanmean(a, b):
+    stacked = np.asarray([a, b], dtype=float)
+    if np.isnan(stacked).all():
+        return np.full_like(np.asarray(a, dtype=float), np.nan)
+    counts = np.sum(~np.isnan(stacked), axis=0)
+    means = np.full_like(np.asarray(a, dtype=float), np.nan)
+    valid = counts > 0
+    if np.any(valid):
+        sums = np.nansum(stacked, axis=0)
+        means[valid] = sums[valid] / counts[valid]
+    return means
+
+
 def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
     numberDoppler=len(matriu[0])
     speed=np.arange(0,fNy*numberDoppler,fNy)
@@ -46,9 +74,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
         vect=matriu[i]
 
 
-        PT3=np.nansum(vect)
-        w3=np.nansum(np.prod([vect,speed],axis=0))/PT3#estimated velocity
-        sigma3=np.sqrt(np.nansum(np.prod([vect,np.power(speed-w3,2)],axis=0))/PT3)# spectral witdh
+        w3, sigma3, PT3 = _safe_velocity_sigma(vect, speed)
         W.append(w3)
         Sig.append(sigma3)
         vect2=[];vect3=[]
@@ -127,9 +153,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                 if W[i-1]>(fNy*numberDoppler/2):
                     vect2=vect[int(numberDoppler*5/4):int(numberDoppler*9/4)]
                     speed2=speeddeal[int(numberDoppler*5/4):int(numberDoppler*9/4)]
-                    PT4=np.nansum(vect2)
-                    w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                    sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                    w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
                     W_da.append(w4)
 
                     deal=np.concatenate([Nul1,vect2,Nul2])
@@ -144,9 +168,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                     if W[i-1]<(fNy*numberDoppler/3):
                         vect2=vect[int(numberDoppler*3/4):int(numberDoppler*5/4)]
                         speed2=speeddeal[int(numberDoppler*3/4):int(numberDoppler*5/4)]
-                        PT4=np.nansum(vect2)
-                        w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                        sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                        w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
 
                         
                         W_da.append(w4)
@@ -161,9 +183,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                     else:
                         vect2=vect[int(numberDoppler):int(numberDoppler*2)]
                         speed2=speeddeal[int(numberDoppler):int(numberDoppler*2)]
-                        PT4=np.nansum(vect2)
-                        w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                        sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                        w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
                         W_da.append(w4)
                         deal=np.concatenate([vec_null,vect2,vec_null])
                         if np.isnan(deal).all():
@@ -180,9 +200,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                     if W[i-1]>(fNy*numberDoppler/2):
                         vect2=vect[int(numberDoppler*5/4):int(numberDoppler*9/4)]
                         speed2=speeddeal[int(numberDoppler*5/4):int(numberDoppler*9/4)]
-                        PT4=np.nansum(vect2)
-                        w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                        sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                        w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
 
                         W_da.append(w4)
                         deal=np.concatenate([Nul1,vect2,Nul2])
@@ -197,9 +215,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                         if W[i-1]<(fNy*numberDoppler*1/4):
                             vect2=vect[int(numberDoppler*3/4):int(numberDoppler*5/4)]
                             speed2=speeddeal[int(numberDoppler*3/4):int(numberDoppler*5/4)]
-                            PT4=np.nansum(vect2)
-                            w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                            sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                            w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
 
                             W_da.append(w4)
                             deal=np.concatenate([Nul2,vect2,Nul1])
@@ -213,9 +229,7 @@ def Aliasing(matriu,fNy,he,temps):#analyse to correct the aliasing
                         else:
                             vect2=vect[int(numberDoppler):int(numberDoppler*2)]
                             speed2=speeddeal[int(numberDoppler):int(numberDoppler*2)]
-                            PT4=np.nansum(vect2)
-                            w4=np.nansum(np.prod([vect2,speed2],axis=0))/PT4#estimated velocity
-                            sigma4=np.sqrt(np.nansum(np.prod([vect2,np.power(speed2-w4,2)],axis=0))/PT4)# spectral witdh
+                            w4, sigma4, PT4 = _safe_velocity_sigma(vect2, speed2)
                             W_da.append(w4)
                             deal=np.concatenate([vec_null,vect2,vec_null])
                             if np.isnan(deal).all():
@@ -262,25 +276,27 @@ def Inter1D(vector):
 
 
 
-    indx=np.argwhere(~np.isnan(y))
+    indx=np.flatnonzero(~np.isnan(y))
 
 
 
     if len(indx)>5:
+        start_idx=int(indx[0])
+        end_idx=int(indx[-1])
         nou=[];noux=[];Nanx=[]
 
-        for i in range(int(indx[-1]-indx[0])):
-            if ~np.isnan(y[indx[0]+i]):
+        for i in range(end_idx-start_idx):
+            if ~np.isnan(y[start_idx+i]):
                 
             
-                nou.append(float(y[indx[0]+i]))
+                nou.append(float(y[start_idx+i]))
                 noux.append(i)
             Nanx.append(i)
               
 
         y2= np.interp(Nanx, noux, nou)
-        Inici=np.ones(int(indx[0]))*np.nan
-        Fi=np.ones(len(y)-int(indx[-1]))*np.nan
+        Inici=np.ones(start_idx)*np.nan
+        Fi=np.ones(len(y)-end_idx)*np.nan
 
         y3=np.concatenate((Inici,y2))
 
@@ -373,18 +389,18 @@ def foundNonan(vector):#return the lats value that is not a nan
 
 def BB2(V,ZE,he,SK,KUR,last_bot,last_top,last_peak):#the input are fall speed, equivalent reflectivity and height 
 
-    indNan_b=np.argwhere(~np.isnan(last_bot))
+    indNan_b=np.flatnonzero(~np.isnan(last_bot))
     if len(indNan_b)==0:
         last_bb_bot=np.nan
     else:
         last_bb_bot=last_bot[int(indNan_b[-1])]
-    indNan_t=np.argwhere(~np.isnan(last_top))
+    indNan_t=np.flatnonzero(~np.isnan(last_top))
     if len(indNan_t)==0:
         last_bb_top=np.nan
     else:
         last_bb_top=last_top[int(indNan_t[-1])]
 
-    indNan_t=np.argwhere(~np.isnan(last_peak))
+    indNan_t=np.flatnonzero(~np.isnan(last_peak))
     if len(indNan_t)==0:
         last_bb_peak=np.nan
     else:
@@ -701,7 +717,7 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
             else:
                 dif2.append(abs((D[m][n+1]-D[m][n])))
                 dif.append(abs((D[m][n+1]-D[m][n-1]))/2.)
-        Z_pol_h.append(10*np.log10(np.nansum(np.prod([nde,pow(np.asarray(D[m]),6),dif],axis=0))))
+        Z_pol_h.append(_safe_log10_from_linear(np.nansum(np.prod([nde,pow(np.asarray(D[m]),6),dif],axis=0))))
 
         DeltaAlt=he[3]-he[2]
 
@@ -719,7 +735,8 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
                         
             num=2.*kp*DeltaAlt
 
-            N=-1.*np.multiply(Np,np.log(1-num)/num)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                N=-1.*np.multiply(Np,np.log(1-num)/num)
             Pro2=[]
             for k in range(len(N)):
                 pro2=SigmaExt[m][k]*N[k]*dif[k]
@@ -737,8 +754,7 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
 
             PIAind.append(pia)
         vel=np.copy(speeddeal)
-        PT=np.nansum(vect1)
-        w=np.nansum(np.prod([vect1,vel],axis=0))/PT#estimated velocity
+        w, _, PT = _safe_velocity_sigma(vect1, vel)
 
         value=np.nansum(np.prod([np.power(D[m],6),nde,dif2],axis=0))
         value2=np.nansum(np.prod([np.power(D[m],3),nde,dif2],axis=0))
@@ -790,7 +806,7 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
     vwaterMiestr=2.65*np.power(ze,.114)
     #Thunderstorm Rain (S-S)
     vwaterMieconv=4.13*np.power(ze,.062)
-    vwaterMie=np.nanmean([vwaterMieconv,vwaterMiestr],axis=0)
+    vwaterMie=_safe_pair_nanmean(vwaterMieconv,vwaterMiestr)
     
     speeddeal=np.arange(-Nbins*fNy,2*Nbins*fNy,fNy)
     NewM=[];state=[];mov=[];VerTur=[]
@@ -810,9 +826,7 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
                 
             else:
                                         
-                PT3=np.nansum(ReVect)
-                w3=np.nansum(np.prod([ReVect,speeddeal],axis=0))/PT3#estimated velocity
-                sigma3=np.sqrt(np.nansum(np.prod([ReVect,np.power(speeddeal-w3,2)],axis=0))/PT3)# spectral witdh
+                w3, sigma3, PT3 = _safe_velocity_sigma(ReVect, speeddeal)
                     
                 S=(w3-(dv[o]*vsnowR[o]))
                 L=(w3-(dv[o]*vwaterMie[o]))
@@ -929,9 +943,7 @@ def Process(matrix,he,temps,D,cte,neta,deltavel,code,Noi_spe_ref):#This function
             
             
 
-            PT=np.nansum(vector)
-            w=np.nansum(np.prod([vector,vel],axis=0))/PT#estimated velocity
-            sigma=np.sqrt(np.nansum(np.prod([vector,np.power(vel-w,2)],axis=0))/PT)# spectral witdh
+            w, sigma, PT = _safe_velocity_sigma(vector, vel)
             sk=np.nansum(np.prod([vector,np.power(vel-w,3)],axis=0))/(PT*pow(sigma,3))# skewnes
             Kur=np.nansum(np.prod([vector,np.power(vel-w,4)],axis=0))/(PT*pow(sigma,4))# Kurtosis
             ValueZe=(10**18*lamb**4*deltavel*np.nansum(NewM[m]))/(np.pi**5*K2w)
@@ -1369,30 +1381,43 @@ def MrrProNoise2(vector,he,DifRange,limitTime):
     v1=np.copy(vector)
     v2=np.copy(vector)
 
+    if np.isnan(vector).all():
+        soroll=np.nan
+        v10=np.ones(len(vector))*np.nan
+        return v10,soroll
+
     meanv=np.nanmean(v1)
     varv=np.nanvar(v1)
-    quo=meanv**2/varv
-    rate=np.nanmax(v1)/np.nanmean(v1)
+    quo=np.inf if varv==0. else meanv**2/varv
+    rate=np.inf if meanv==0. else np.nanmax(v1)/meanv
     ValLim=limitTime
 
-    if np.isnan(vector).all() or (quo>ValLim and rate<1.3):
+    if quo>ValLim and rate<1.3:
         soroll=np.nan
         v10=np.ones(len(vector))*np.nan
     else:
         condition=1
         while condition:
-            quo2=np.nanmean(v1)**2/np.nanvar(v1)
-            rate2=np.nanmax(v1)/np.nanmean(v1)
+            if np.isnan(v1).all():
+                soroll=np.nan
+                condition=0
+                continue
 
-            if (quo2>ValLim and rate2<1.3) or np.nanvar(v1)==0.:
-                if np.nanvar(v1)==0.:
+            meanv1=np.nanmean(v1)
+            varv1=np.nanvar(v1)
+            quo2=np.inf if varv1==0. else meanv1**2/varv1
+            rate2=np.inf if meanv1==0. else np.nanmax(v1)/meanv1
+
+            if (quo2>ValLim and rate2<1.3) or varv1==0.:
+                if varv1==0.:
                     soroll=np.nanmin(vector)
                     
                 else:
                     number=len(vector)-np.count_nonzero(~np.isnan(v1))
-                    soroll=np.nanmean(v1)
+                    soroll=meanv1
                 condition=0
-            np.put(v1,np.nanargmax(v1),np.nan)
+            else:
+                np.put(v1,np.nanargmax(v1),np.nan)
         v8=vector-soroll
         v9=np.ones(len(v8))
         v9[v8<(np.nanmax(v8)*0.1)]=np.nan

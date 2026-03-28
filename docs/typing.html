@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mrrpropy typing strategy</title>
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header compact">
+    <div class="wrap">
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="workflow.html">Workflow</a>
+        <a href="typing.html">Typing</a>
+        <a href="api/mrrpropy.html">API reference</a>
+      </nav>
+      <h1>Typing strategy</h1>
+    </div>
+  </header>
+
+  <main class="wrap prose">
+    <h2>Current scope</h2>
+    <p>
+      The repository is marked as typed and includes a baseline <code>mypy</code>
+      configuration focused on:
+    </p>
+    <ul>
+      <li>the public package entry points,</li>
+      <li>the high-level <code>MRRProData</code> API,</li>
+      <li>workflow scripts, CLI and test fixtures.</li>
+    </ul>
+
+    <h2>Why not full strict typing everywhere</h2>
+    <p>
+      The RaProMPro scientific kernels are intentionally treated more conservatively.
+      Over-aggressive refactors in those files increase the risk of changing scientific
+      behaviour while chasing type cleanliness.
+    </p>
+
+    <h2>Local check</h2>
+    <pre><code>uv run mypy</code></pre>
+
+    <h2>Recommended next steps</h2>
+    <ul>
+      <li>Expand annotations around plotting and analysis methods in <code>raw_class.py</code>.</li>
+      <li>Add small typed helper aliases for common dataset/array shapes.</li>
+      <li>Keep scientific kernels behind equivalence tests before tightening types there.</li>
+    </ul>
+  </main>
+</body>
+</html>

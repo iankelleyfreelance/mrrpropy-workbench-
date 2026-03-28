@@ -1,149 +1,206 @@
-# tests/test_mrrpro_rarpom.py
 from __future__ import annotations
 
+import csv
+import os
+from collections.abc import Iterator
 from pathlib import Path
 
+import matplotlib
 from matplotlib import pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
 
-from mrrpropy.raw_class import MRRProData
+matplotlib.use("Agg")
 
-# Ruta por defecto al fichero de prueba.
-# Puedes sobrescribirla con la variable de entorno MRRPRO_TEST_FILE.
-before_path = Path(r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
-after_path  = Path(before_path.absolute().as_posix().replace('RAW', 'PRODUCTS')).parent / f"{before_path.stem}_raprompro.nc"
-OUTPUT_DIR = Path(r"./tests/figures/mrrpro_raprompro_intercomparison")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+pytestmark = [pytest.mark.slow, pytest.mark.integration]
+
+KEY_REGRESSION_PAIRS = [
+    ("Ze", "Ze", "dBZ"),
+    ("RR", "RR", "mm/hr"),
+    ("LWC", "LWC", "g/m3"),
+    ("VEL", "W", "m/s"),
+]
+
+
+def _align_2d(a: xr.DataArray, b: xr.DataArray) -> tuple[xr.DataArray, xr.DataArray]:
+    if "range" in a.dims and "height" in b.dims:
+        b = b.rename({"height": "range"})
+    if "height" in a.dims and "range" in b.dims:
+        a = a.rename({"height": "range"})
+    try:
+        a2, b2 = xr.align(a, b, join="inner")
+    except Exception:
+        a2 = a
+        b2 = b
+    return a2, b2
+
+
+def _stats(x: np.ndarray, y: np.ndarray) -> dict[str, float] | None:
+    mask = np.isfinite(x) & np.isfinite(y)
+    if mask.sum() < 10:
+        return None
+    xx = x[mask].astype(float)
+    yy = y[mask].astype(float)
+    bias = float(np.mean(yy - xx))
+    rmse = float(np.sqrt(np.mean((yy - xx) ** 2)))
+    corr = float(np.corrcoef(xx, yy)[0, 1]) if xx.size > 1 else np.nan
+    slope, intercept = np.polyfit(xx, yy, 1)
+    return {
+        "n": int(mask.sum()),
+        "bias": bias,
+        "rmse": rmse,
+        "corr": corr,
+        "slope": float(slope),
+        "intercept": float(intercept),
+    }
+
 
 @pytest.fixture(scope="session")
-def mrr():
-    """Carga una instancia de MRRProData para todos los tests."""
-    if not before_path.exists():
-        pytest.skip(f"No se encuentra el archivo de data: {before_path}")
-    mrr = MRRProData.from_file(before_path)
-    yield mrr
-    mrr.close()
+def raw_dataset(raw_dataset_path: Path) -> Iterator[xr.Dataset]:
+    ds = xr.open_dataset(raw_dataset_path)
+    yield ds
+    ds.close()
 
 
-def test_processing_raprompro(mrr) -> xr.Dataset:
-    """
-    Ejecuta una vez el procesado RaProM-Pro y reutiliza el resultado en todos los tests.
-    """
-
-    out = mrr.process_raprompro(save_dsd_3d=True, save_spe_3d=True, save=True, output_dir = after_path.parent)
-    
-    assert isinstance(out, xr.Dataset)    
+@pytest.fixture(scope="session")
+def generated_raprompro_dataset(generated_raprompro_path: Path) -> Iterator[xr.Dataset]:
+    ds = xr.open_dataset(generated_raprompro_path)
+    yield ds
+    ds.close()
 
 
-def test_process_raprompro():
-    """Verifica que el procesamiento RaProM-Pro produce un Dataset."""
-    ds0 = xr.open_dataset(before_path)
-    ds1 = xr.open_dataset(after_path)
-
-    # Mapeo recomendado: (var_before, var_after, units)
-    pairs = [
-        ("Ze", "Ze", "dBZ"),
-        ("Zea", "Zea", "dBZ"),
-        ("Za", "Za", "dBZ"),
-        ("RR", "RR", "mm/hr"),
-        ("LWC", "LWC", "g/m3"),
-        ("SNR", "SNR", "dB"),
-        ("PIA", "DBPIA", "dB"),
-        ("VEL", "W", "m/s"),
-        ("WIDTH", "spectral width", "m/s"),
-    ]
-
-    def align_2d(a: xr.DataArray, b: xr.DataArray):
-        """
-        Alinea por índices/dims cuando los nombres difieren (range vs height),
-        pero las formas son (time, z). Ajusta aquí si tu caso usa coords distintos.
-        """
-        # Normaliza dims verticales
-        if "range" in a.dims and "height" in b.dims:
-            b = b.rename({"height": "range"})
-        if "height" in a.dims and "range" in b.dims:
-            a = a.rename({"height": "range"})
-        # Alinea por intersección de coords si existen y coinciden, si no por índice
-        try:
-            a2, b2 = xr.align(a, b, join="inner")
-        except Exception:
-            a2 = a
-            b2 = b
-        return a2, b2
-
-    def stats(x, y):
-        m = np.isfinite(x) & np.isfinite(y)
-        if m.sum() < 10:
-            return None
-        xx = x[m].astype(float)
-        yy = y[m].astype(float)
-        bias = float(np.mean(yy - xx))
-        rmse = float(np.sqrt(np.mean((yy - xx) ** 2)))
-        corr = float(np.corrcoef(xx, yy)[0, 1]) if xx.size > 1 else np.nan
-        # slope/intercept (y = s*x + i)
-        s, i = np.polyfit(xx, yy, 1)
-        return {"n": int(m.sum()), "bias": bias, "rmse": rmse, "corr": corr, "slope": float(s), "intercept": float(i)}
-
-    rows = []
-
-    for v0, v1, units in pairs:
-        if v0 not in ds0 or v1 not in ds1:
-            continue
-
-        a = ds0[v0]
-        b = ds1[v1]
+@pytest.fixture(scope="session")
+def raprompro_reference_dataset(
+    raprompro_reference_path: Path,
+) -> Iterator[xr.Dataset]:
+    ds = xr.open_dataset(raprompro_reference_path)
+    yield ds
+    ds.close()
 
 
-        a, b = align_2d(a, b)
+def test_processing_raprompro_smoke(generated_raprompro_path: Path) -> None:
+    assert generated_raprompro_path.exists()
+    assert generated_raprompro_path.suffix == ".nc"
+    assert generated_raprompro_path.stat().st_size > 0
 
-        x = a.values.ravel()
-        y = b.values.ravel()
+
+def test_processing_raprompro_from_raw(generated_raprompro_path: Path) -> None:
+    if os.getenv("MRRPRO_FORCE_REPROCESS", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        pytest.skip(
+            "Set MRRPRO_FORCE_REPROCESS=1 to force regeneration from RAW in this test."
+        )
+
+    assert generated_raprompro_path.exists()
+    assert generated_raprompro_path.suffix == ".nc"
+    assert generated_raprompro_path.stat().st_size > 0
+
+
+def test_process_raprompro_regression(
+    raw_dataset: xr.Dataset,
+    generated_raprompro_dataset: xr.Dataset,
+    raprompro_reference_dataset: xr.Dataset,
+    artifact_dir: Path,
+) -> None:
+    rows: list[dict[str, float | int | str]] = []
+
+    for v0, v1, units in KEY_REGRESSION_PAIRS:
+        if v0 not in raw_dataset or v1 not in generated_raprompro_dataset:
+            pytest.fail(f"Missing regression variable pair {v0}->{v1} in generated output")
+        if v1 not in raprompro_reference_dataset:
+            pytest.fail(f"Missing reference variable {v1} in raprompro reference file")
+
+        raw_var, generated_var = _align_2d(raw_dataset[v0], generated_raprompro_dataset[v1])
+        _, reference_var = _align_2d(raw_var, raprompro_reference_dataset[v1])
+
+        x = raw_var.values.ravel()
+        y = generated_var.values.ravel()
+        y_ref = reference_var.values.ravel()
+
         if v1 == "DBPIA":
             y = np.abs(y)
+            y_ref = np.abs(y_ref)
 
-        st = stats(x, y)
-        if st is None:
+        stats = _stats(x, y)
+        if stats is None:
+            pytest.fail(f"Not enough valid points for regression check {v0}->{v1}")
+
+        stats.update({"var_before": v0, "var_after": v1, "units": units})
+        rows.append(stats)
+
+        overlap = np.isfinite(y) & np.isfinite(y_ref)
+        assert overlap.sum() > 10, f"No overlap against reference for {v1}"
+        corr_vs_ref = float(np.corrcoef(y[overlap], y_ref[overlap])[0, 1])
+        assert corr_vs_ref > 0.6, f"Low agreement vs reference for {v1}: {corr_vs_ref}"
+        assert stats["corr"] > 0.6, f"Low correlation for {v0}: {stats['corr']}"
+
+    with open(artifact_dir / "metrics.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "var_before",
+                "var_after",
+                "units",
+                "n",
+                "bias",
+                "rmse",
+                "corr",
+                "slope",
+                "intercept",
+            ],
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k) for k in writer.fieldnames})
+
+
+@pytest.mark.plot
+def test_process_raprompro_reference_visual_comparison(
+    raw_dataset: xr.Dataset,
+    raprompro_reference_dataset: xr.Dataset,
+    artifact_dir: Path,
+) -> None:
+    for v0, v1, units in KEY_REGRESSION_PAIRS:
+        if v0 not in raw_dataset or v1 not in raprompro_reference_dataset:
             continue
-        st.update({"var_before": v0, "var_after": v1, "units": units})
-        rows.append(st)
 
-        # downsample for plotting (avoid huge scatter)
-        m = np.isfinite(x) & np.isfinite(y)
-        idx = np.where(m)[0]
+        raw_var, reference_var = _align_2d(raw_dataset[v0], raprompro_reference_dataset[v1])
+        x = raw_var.values.ravel()
+        y = reference_var.values.ravel()
+
+        idx = np.where(np.isfinite(x) & np.isfinite(y))[0]
+        if idx.size < 10:
+            continue
         if idx.size > 200_000:
             idx = np.random.default_rng(0).choice(idx, size=200_000, replace=False)
 
         xx = x[idx].astype(float)
         yy = y[idx].astype(float)
+        stats = _stats(xx, yy)
+        if stats is None:
+            continue
 
         fig = plt.figure()
         plt.scatter(xx, yy, s=1)
         lo = np.nanpercentile(np.concatenate([xx, yy]), 1)
         hi = np.nanpercentile(np.concatenate([xx, yy]), 99)
         plt.plot([lo, hi], [lo, hi])
-        plt.xlabel(f"{v0} (before) [{units}]")
-        plt.ylabel(f"{v1} (after) [{units}]")
-        plt.title(f"1:1 {v0} vs {v1}  |  n={st['n']}  bias={st['bias']:.3g}  rmse={st['rmse']:.3g}  r={st['corr']:.3f}", fontsize=12)
+        plt.xlabel(f"{v0} (raw) [{units}]")
+        plt.ylabel(f"{v1} (reference) [{units}]")
+        plt.title(
+            f"reference {v0} vs {v1} | n={stats['n']} bias={stats['bias']:.3g} rmse={stats['rmse']:.3g} r={stats['corr']:.3f}",
+            fontsize=12,
+        )
         plt.xlim(lo, hi)
         plt.ylim(lo, hi)
-        fig.savefig(OUTPUT_DIR / f"correlation_check_{v0}_vs_{v1}.png", dpi=200, bbox_inches="tight")
+        fig.savefig(
+            artifact_dir / f"reference_correlation_check_{v0}_vs_{v1}.png",
+            dpi=200,
+            bbox_inches="tight",
+        )
         plt.close(fig)
-
-    # Save metrics
-    import csv
-    with open(OUTPUT_DIR / "metrics.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["var_before","var_after","units","n","bias","rmse","corr","slope","intercept"])
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k) for k in w.fieldnames})
-
-    print(f"Saved plots + metrics to: {OUTPUT_DIR.resolve()}")
-    
-    # Assert r values > 0.9 for key variables
-    key_vars = ["Ze", "RR", "LWC", "VEL"]
-    for kv in key_vars:
-        for r in rows:
-            if r["var_before"] == kv:
-                assert r["corr"] > 0.6, f"Low correlation for {kv}: {r['corr']}"

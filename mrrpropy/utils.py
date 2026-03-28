@@ -1,3 +1,5 @@
+"""Small numerical helpers used by the public analysis API."""
+
 from datetime import datetime
 import numpy as np
 

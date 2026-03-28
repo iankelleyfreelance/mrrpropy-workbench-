@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mrrpropy documentation</title>
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <p class="eyebrow">mrrpropy</p>
+      <h1>MRR-PRO processing and analysis documentation</h1>
+      <p class="lead">
+        Developer-facing documentation for the public API, the repository workflow,
+        and the typing/documentation conventions used around the scientific code.
+      </p>
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="workflow.html">Workflow</a>
+        <a href="typing.html">Typing</a>
+        <a href="api/mrrpropy.html">API reference</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap grid">
+    <section class="card">
+      <h2>What this site covers</h2>
+      <p>
+        This documentation deliberately focuses on the stable public API and the
+        repository workflow around the scientific algorithms. The RaProMPro kernels
+        remain reference scientific code; optimizations are handled in controlled
+        wrapper paths and equivalence tests.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Entry points</h2>
+      <ul>
+        <li><code>mrrpropy.raw_class.MRRProData</code> is the main API for loading, processing, plotting and analysis.</li>
+        <li><code>mrrpropy.cli.main</code> exposes the lightweight CLI entry point.</li>
+        <li><code>mrrpropy.hexagram</code> and <code>mrrpropy.utils</code> contain analysis helpers used by the high-level API.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Repository workflow</h2>
+      <p>
+        Tests use bundled NetCDF fixtures under <code>tests/data/</code>. Generated
+        figures go to <code>tests/figures/</code>, and generated non-figure test
+        outputs go to <code>tests/generated/</code>.
+      </p>
+      <p><a href="workflow.html">Open workflow guide</a></p>
+    </section>
+
+    <section class="card">
+      <h2>Typing scope</h2>
+      <p>
+        Typing is enforced first on the public API and workflow utilities. The
+        scientific kernels are intentionally treated more conservatively to avoid
+        accidental behavioural change.
+      </p>
+      <p><a href="typing.html">Open typing guide</a></p>
+    </section>
+
+    <section class="card">
+      <h2>API reference</h2>
+      <p>
+        API pages are generated with <code>pdoc</code> directly from the package
+        docstrings and signatures.
+      </p>
+      <p><a href="api/mrrpropy.html">Open API reference</a></p>
+    </section>
+  </main>
+</body>
+</html>

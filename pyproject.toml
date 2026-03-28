@@ -37,11 +37,12 @@ jupyter = []
 Homepage = "https://github.com/jabravoaranda/mrrpro"
 
 [project.scripts]
-mrrpro = "mrrpro.cli.main:app"
+mrrpro = "mrrpropy.cli.main:app"
 
 [dependency-groups]
 dev = [
     "black>=22.6.0,<23",
+    "mypy>=1.11.2,<2",
     "pytest>8,<8.3.5",
     "pre-commit>=2.20.0,<3",
     "pykalman>=0.9.5,<0.10",
@@ -49,8 +50,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ['/README.md', '/tests', '/pyproject.toml', '/LICENSE', '/MANIFEST.in', '/CHANGELOG.md', '.pre-commint-config.yaml']
-# exclude = ['/tests/data/RAW']
+include = ["/README.md", "/LICENSE", "/pyproject.toml", "/mrrpropy", "/tests"]
 
 [tool.hatch.build.targets.wheel]
 include = ["mrrpropy"]
@@ -61,3 +61,30 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "mrrpropy/__init__.py"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: exercises expensive processing or plotting workflows",
+    "plot: writes diagnostic figures for manual inspection",
+    "integration: covers end-to-end data workflows across multiple components",
+]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "mrrpropy/__init__.py",
+    "mrrpropy/raw_class.py",
+    "mrrpropy/utils.py",
+    "mrrpropy/hexagram.py",
+    "mrrpropy/cli",
+    "scripts",
+    "tests/conftest.py",
+]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+pretty = true
