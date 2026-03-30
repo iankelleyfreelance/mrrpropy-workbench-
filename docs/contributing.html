@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mrrpropy contributing</title>
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header compact">
+    <div class="wrap">
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="getting-started.html">Getting started</a>
+        <a href="processing-workflow.html">Processing workflow</a>
+        <a href="examples.html">Examples</a>
+        <a href="api/mrrpropy.html">API reference</a>
+        <a href="contributing.html">Contributing</a>
+      </nav>
+      <h1>Contributing</h1>
+    </div>
+  </header>
+
+  <main class="wrap prose">
+    <h2>Development environment</h2>
+    <pre><code>uv sync --group dev
+uv run pytest -m "not slow"
+uv run black --check mrrpropy tests
+uv run mypy</code></pre>
+
+    <h2>Repository conventions</h2>
+    <ul>
+      <li>Generated figures from tests live under <code>tests/figures/</code>.</li>
+      <li>Generated NetCDF and other non-figure outputs live under <code>tests/generated/</code>.</li>
+      <li>Bundled fixtures under <code>tests/data/</code> remain the reference inputs and outputs.</li>
+    </ul>
+
+    <h2>Scientific code boundaries</h2>
+    <p>
+      The repository separates workflow improvements from scientific changes. Packaging,
+      documentation, CI, typing and test structure can evolve independently of the
+      RaProMPro scientific kernels. Behavioural changes in the scientific modules should
+      be validated with the equivalence tests already present in the suite.
+    </p>
+
+    <h2>Documentation build</h2>
+    <pre><code>python -m pip install ".[docs]"
+python scripts/build_docs.py
+python -m http.server 8000 --directory site</code></pre>
+    <p>
+      The docs site uses static HTML pages for the narrative sections and
+      <code>pdoc</code> for the API reference.
+    </p>
+
+    <h2>Typing scope</h2>
+    <p>
+      Typing currently focuses on the public API, CLI, workflow scripts and test
+      fixtures. The long scientific kernels are typed more conservatively to avoid
+      accidental behavioural change during refactors.
+    </p>
+  </main>
+</body>
+</html>

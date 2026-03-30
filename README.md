@@ -45,5 +45,6 @@ For the full one-hour fixture, pass `--raw-path` explicitly or omit `--quick`.
 The repository includes a static documentation site for GitHub Pages.
 
 - Build locally with `python scripts/build_docs.py` after installing `.[docs]`.
+- Preview locally with `python -m http.server 8000 --directory site` after the build.
 - The landing pages live under `docs/`.
 - The API reference is generated with `pdoc` from package docstrings and signatures.

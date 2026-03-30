@@ -3,74 +3,105 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>mrrpropy documentation</title>
+  <title>mrrpropy</title>
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
   <header class="site-header">
     <div class="wrap">
-      <p class="eyebrow">mrrpropy</p>
-      <h1>MRR-PRO processing and analysis documentation</h1>
-      <p class="lead">
-        Developer-facing documentation for the public API, the repository workflow,
-        and the typing/documentation conventions used around the scientific code.
-      </p>
       <nav class="nav">
         <a href="index.html">Overview</a>
-        <a href="workflow.html">Workflow</a>
-        <a href="typing.html">Typing</a>
+        <a href="getting-started.html">Getting started</a>
+        <a href="processing-workflow.html">Processing workflow</a>
+        <a href="examples.html">Examples</a>
         <a href="api/mrrpropy.html">API reference</a>
+        <a href="contributing.html">Contributing</a>
       </nav>
+      <p class="eyebrow">mrrpropy {{VERSION}}</p>
+      <h1>Load, process, plot and analyse METEK MRR-PRO data</h1>
+      <p class="lead">
+        <code>mrrpropy</code> is a scientific Python package for working with
+        METEK MRR-PRO radar observations. It provides a high-level API to load raw
+        NetCDF files, run or load RaProMPro products, inspect Doppler spectra,
+        generate quicklooks, and analyse rain microphysical processes.
+      </p>
+      <div class="cta-row">
+        <a class="button" href="getting-started.html">Quick start</a>
+        <a class="button secondary" href="api/mrrpropy.html">API reference</a>
+      </div>
     </div>
   </header>
 
-  <main class="wrap grid">
-    <section class="card">
-      <h2>What this site covers</h2>
-      <p>
-        This documentation deliberately focuses on the stable public API and the
-        repository workflow around the scientific algorithms. The RaProMPro kernels
-        remain reference scientific code; optimizations are handled in controlled
-        wrapper paths and equivalence tests.
-      </p>
+  <main class="wrap">
+    <section class="hero-grid">
+      <div class="card">
+        <h2>What the package does</h2>
+        <ul>
+          <li>Load CF/Radial-style MRR-PRO NetCDF files into an <code>MRRProData</code> object.</li>
+          <li>Run the RaProMPro processing workflow or load previously generated products.</li>
+          <li>Plot reflectivity quicklooks, spectra, spectrograms, DSD views and profile diagnostics.</li>
+          <li>Analyse layer-scale rain-process signatures from <code>Dm</code>, <code>Nw</code> and <code>LWC</code>.</li>
+          <li>Classify process evolution on the RGB hexagram used by the package.</li>
+        </ul>
+      </div>
+      <figure class="figure-card">
+        <img src="assets/hero_quicklook_ze.png" alt="Quicklook of Ze generated from mrrpropy">
+        <figcaption>Representative reflectivity quicklook produced by the package.</figcaption>
+      </figure>
     </section>
 
     <section class="card">
-      <h2>Entry points</h2>
-      <ul>
-        <li><code>mrrpropy.raw_class.MRRProData</code> is the main API for loading, processing, plotting and analysis.</li>
-        <li><code>mrrpropy.cli.main</code> exposes the lightweight CLI entry point.</li>
-        <li><code>mrrpropy.hexagram</code> and <code>mrrpropy.utils</code> contain analysis helpers used by the high-level API.</li>
-      </ul>
+      <h2>Quick start</h2>
+      <p>
+        The public API is centered on <code>mrrpropy.raw_class.MRRProData</code>.
+        A typical workflow is to open a raw file, load or compute the processed
+        product, and plot one diagnostic field.
+      </p>
+      <pre><code>from pathlib import Path
+
+from mrrpropy.raw_class import MRRProData
+
+raw_path = Path("tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
+processed_path = Path("tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_raprompro.nc")
+
+mrr = MRRProData.from_file(raw_path)
+
+# Fast path if a processed product already exists
+mrr.load_raprompro(processed_path)
+
+# Alternatively, generate a processed dataset
+# mrr.process_raprompro_optimized(save=False)
+
+fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
+      <p><a href="getting-started.html">Open the full getting started guide</a></p>
+    </section>
+
+    <section class="grid two-up">
+      <section class="card">
+        <h2>Processing workflow</h2>
+        <p>
+          The package keeps the scientific RaProMPro implementation available while
+          exposing a higher-level, xarray-based interface for processing and diagnostics.
+        </p>
+        <p><a href="processing-workflow.html">Open workflow guide</a></p>
+      </section>
+      <section class="card">
+        <h2>Examples</h2>
+        <p>
+          Examples cover reflectivity quicklooks, Doppler spectrum views and
+          microphysical-process analysis using the current public API.
+        </p>
+        <p><a href="examples.html">Open examples</a></p>
+      </section>
     </section>
 
     <section class="card">
-      <h2>Repository workflow</h2>
+      <h2>Developer material</h2>
       <p>
-        Tests use bundled NetCDF fixtures under <code>tests/data/</code>. Generated
-        figures go to <code>tests/figures/</code>, and generated non-figure test
-        outputs go to <code>tests/generated/</code>.
+        Contributor workflow, typing scope and documentation build details remain
+        available, but they are secondary to the user-facing documentation.
       </p>
-      <p><a href="workflow.html">Open workflow guide</a></p>
-    </section>
-
-    <section class="card">
-      <h2>Typing scope</h2>
-      <p>
-        Typing is enforced first on the public API and workflow utilities. The
-        scientific kernels are intentionally treated more conservatively to avoid
-        accidental behavioural change.
-      </p>
-      <p><a href="typing.html">Open typing guide</a></p>
-    </section>
-
-    <section class="card">
-      <h2>API reference</h2>
-      <p>
-        API pages are generated with <code>pdoc</code> directly from the package
-        docstrings and signatures.
-      </p>
-      <p><a href="api/mrrpropy.html">Open API reference</a></p>
+      <p><a href="contributing.html">Open contributing guide</a></p>
     </section>
   </main>
 </body>

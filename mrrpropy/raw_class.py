@@ -1,4 +1,16 @@
-"""High-level API for MRR-PRO data access, processing and plotting."""
+"""
+High-level API for METEK MRR-PRO data access, processing, plotting and analysis.
+
+The package is organized around :class:`MRRProData`, which wraps an xarray
+dataset and exposes three main workflows:
+
+1. Load and inspect raw MRR-PRO NetCDF files.
+2. Run or load RaProMPro processed products.
+3. Generate diagnostic plots and rain-process analyses from processed variables.
+
+The lower-level scientific kernels remain in the ``RaProMPro_*`` modules. This
+module provides the user-facing interface built on top of them.
+"""
 
 from __future__ import annotations
 
@@ -48,6 +60,8 @@ plt.rcParams.update(
 
 @dataclass
 class MicrophysicsConfig:
+    """Default thresholds and RGB/hexagram settings for rain-process analysis."""
+
     variable_threshold: str = "Ze"
     threshold_value: float = -5.0
     min_points_ols: int = 10
@@ -62,6 +76,8 @@ class MicrophysicsConfig:
 
 @dataclass
 class PlotConfig:
+    """Default plotting configuration shared by the high-level plotting methods."""
+
     figsize: tuple[float, float] = (10, 10)
     figsize_hex: tuple[float, float] = (10, 10)
     figsize_summary: tuple[float, float] = (14, 10)
@@ -83,14 +99,16 @@ class PlotConfig:
 @dataclass
 class MRRProData:
     """
-    Helper class for working with METEK MRR-PRO data in CF/Radial format.
+    User-facing container for raw and processed METEK MRR-PRO datasets.
 
-    Main Attributes
-    ----------------
-    path : str
-        Path to the NetCDF file.
-    ds : xr.Dataset
-        xarray Dataset containing all MRR-PRO data.
+    The object holds the raw xarray dataset in :attr:`ds` and, when available,
+    a processed RaProMPro product in :attr:`raprompro`. Most public methods fall
+    into one of four groups:
+
+    - raw-data access and subsetting,
+    - RaProMPro processing or loading,
+    - radar/spectral plotting,
+    - microphysical and hexagram-based rain-process analysis.
     """
 
     path: str | Path
@@ -111,7 +129,18 @@ class MRRProData:
     @classmethod
     def from_file(cls, path: str | Path) -> "MRRProData":
         """
-        Load a MRR-PRO NetCDF file and return a class instance.
+        Open a raw MRR-PRO NetCDF file and wrap it in :class:`MRRProData`.
+
+        Parameters
+        ----------
+        path:
+            Path to a raw MRR-PRO NetCDF file readable by :mod:`xarray`.
+
+        Returns
+        -------
+        MRRProData
+            Object holding the opened dataset and ready for plotting, processing
+            or loading an existing RaProMPro product.
         """
         ds = xr.open_dataset(path)
         return cls(path=path, ds=ds)
@@ -280,8 +309,12 @@ class MRRProData:
         **kwargs: Any,
     ) -> xr.Dataset:
         """
-        Backward-compatible entry point that currently delegates to the original
-        wrapper implementation.
+        Backward-compatible processing entry point.
+
+        This method currently delegates to :meth:`process_raprompro_original`.
+        Use :meth:`process_raprompro_optimized` explicitly if you want the
+        optimized wrapper path that is being validated against the reference
+        scientific implementation.
         """
         return self.process_raprompro_original(*args, **kwargs)
 
@@ -295,7 +328,11 @@ class MRRProData:
         **kwargs,
     ) -> xr.Dataset:
         """
-        Reference wrapper around the published RaProM-Pro implementation.
+        Run the reference RaProMPro wrapper and return a processed dataset.
+
+        This is the stable path that mirrors the published scientific workflow as
+        closely as possible. It is the safest choice when exact reference
+        behaviour matters more than runtime.
         """
         out = self._process_raprompro_impl(
             cache_attr="raprompro_original",
@@ -319,8 +356,12 @@ class MRRProData:
         **kwargs,
     ) -> xr.Dataset:
         """
-        Placeholder for an optimized wrapper path. It intentionally shares the
-        current scientific implementation until optimizations are introduced.
+        Run the optimized RaProMPro wrapper path and return a processed dataset.
+
+        This path keeps the same scientific outputs as the reference workflow
+        while reducing Python-side overhead where possible. It is intended to be
+        checked against the equivalence tests before being used as a drop-in
+        replacement for the reference path.
         """
         return self._process_raprompro_impl(
             cache_attr="raprompro_optimized",
@@ -344,12 +385,11 @@ class MRRProData:
         **kwargs: Any,
     ) -> xr.Dataset:
         """
-        Run RaProM-Pro processing using the published CLI algorithm implementation
-        (RaProMPro_original.py), but exposed as a method returning an xarray.Dataset.
+        Internal implementation shared by the original and optimized wrapper paths.
 
-        Key design goal: keep the scientific algorithm and naming consistent with
-        the original CLI output (Type, W, spectral width, Skewness, Kurtosis, DBPIA,
-        LWC, RR, SR, Za, Z, Zea, Ze, Z_all, ... and BB_*).
+        The resulting dataset follows the variable naming used by the scientific
+        RaProMPro workflow, including fields such as ``Type``, ``DBPIA``, ``Za``,
+        ``Zea``, ``Ze``, ``Dm``, ``Nw``, ``LWC`` and ``RR``.
         """
         cached = getattr(self, cache_attr)
         if cached is not None:
@@ -1185,7 +1225,7 @@ class MRRProData:
         assign: bool = True,
     ) -> xr.Dataset:
         """
-        Carga un NetCDF ya procesado por RaProMPro y lo asigna a self.raprompro.
+        Load an existing RaProMPro NetCDF product and optionally validate it.
 
         Parameters
         ----------
@@ -1203,6 +1243,8 @@ class MRRProData:
         Returns
         -------
         xr.Dataset
+            Loaded processed dataset. If ``assign=True``, it is also stored in
+            :attr:`raprompro`.
         """
         path = Path(path)
         if not path.exists():
@@ -1427,9 +1469,25 @@ class MRRProData:
         **kwargs: Any,
     ) -> tuple[Figure, Axes]:
         """
-        Create a time–range plot of reflectivity (or any 2D variable time × range).
+        Plot a quick time-height view of a raw or processed 2D field.
 
-        Requires matplotlib. Intended for quick inspections.
+        This is the fastest visual diagnostic for fields such as ``Ze``, ``Zea``,
+        ``Za``, ``RR`` or other variables stored on the ``(time, range)`` grid.
+
+        Parameters
+        ----------
+        variable:
+            Name of the variable to plot.
+        source:
+            ``"raw"`` to read from :attr:`ds`, or ``"raprompro"`` to read from
+            :attr:`raprompro`.
+        vmin, vmax:
+            Optional color limits in data units.
+
+        Returns
+        -------
+        tuple[Figure, Axes]
+            Matplotlib figure and axes.
         """
         pcfg = self.plot_cfg  # instancia de PlotConfig
 
@@ -1481,7 +1539,11 @@ class MRRProData:
         **kwargs,
     ) -> tuple[Figure, Path | None]:
         """
-        Plot a 1D spectrum at a specified time and range.
+        Plot a single-gate Doppler spectrum at a selected time and range.
+
+        The method supports the spectral variables already exposed by the raw
+        MRR-PRO files, typically ``spectrum_reflectivity`` or ``spectrum_raw``.
+
         Parameters
         ----------
         target_datetime : datetime | np.datetime64
@@ -1788,7 +1850,7 @@ class MRRProData:
         **kwargs,
     ) -> tuple[Figure, Path | None]:
         """
-        Plot a spectrogram of MRR-PRO radar data for a specified time.
+        Plot a range-by-velocity spectrogram at the nearest requested time.
 
         Parameters
         ----------
@@ -2465,17 +2527,15 @@ class MRRProData:
         min_points_ols: int = 10,
     ) -> xr.Dataset:
         """
-        Compute b_X (1/m), F_X, and R^2 for X in vars using OLS of ln(X) vs depth from top,
-        and store the data selection used for each fit (masks + eps + counts).
+        Compute layer-wise OLS trends of selected microphysical variables.
 
-        Output includes:
-        - b_<var>, a_<var>, r2_<var>, F_<var> : (time,)
-        - eps_<var> : (time,)
-        - n_fit_<var> : (time,)
-        - mask_fit_<var> : (time, range_layer)  (True where points used in OLS)
-        - mask_ze : (time, range_layer)
-        - coords: time, range_layer, depth (depth from top; meters)
-        - attrs: z_top, z_base, dz, threshold settings, eps settings, q, min_points_ols
+        For each time step, the method fits ``ln(X)`` versus depth from the top
+        of the selected layer, after thresholding on a reflectivity field such as
+        ``Ze``. It returns slopes, intercepts, fit quality and the masks actually
+        used in each regression.
+
+        The output is designed to be traceable and reusable by
+        :meth:`rain_process_analyze`.
         """
         if not self._is_processed():
             raise RuntimeError("MRR-Pro data not processed (raprompro missing).")
@@ -2637,15 +2697,20 @@ class MRRProData:
         vars_trend: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
     ) -> xr.Dataset:
         """
-        Analiza proceso de lluvia en una capa y periodo: OLS (trends) -> RGB -> hex mapping.
+        Analyse rain-process evolution in a layer over a selected period.
+
+        The workflow is:
+
+        1. compute OLS trends for ``vars_trend``,
+        2. map those trends into RGB space,
+        3. project the RGB samples onto the package hexagram grid.
 
         Returns
         -------
-        xr.Dataset con coords time y variables:
-        - b_*, a_*, r2_*, F_*, n_valid, eps_*, n_fit_*, mask_fit_* (de compute_layer_trend_ols)
-        - R, G, B (0..1)
-        - minutes (float)
-        - hex_x, hex_y, hex_area (+ snap_R,G,B si disponible)
+        xr.Dataset
+            Dataset containing the trend diagnostics, RGB channels, elapsed
+            minutes and the hexagram coordinates used downstream for plotting and
+            classification.
         """
         if not self._is_processed():
             raise RuntimeError("Dataset not preprocessed / raprompro not available.")
@@ -2914,13 +2979,13 @@ class MRRProData:
         min_strength: float = 0.10,
     ) -> xr.Dataset:
         """
-        Classify rain process from analysis output using PROCESS_SIGNATURES from
-        mrrpropy.hexagram.
+        Classify each time sample into a rain-process category.
 
-        Assumes RGB mapping:
-            R -> Dm
-            G -> Nw
-            B -> LWC
+        The method expects the RGB mapping created by
+        :meth:`rain_process_analyze`, with the convention ``R -> Dm``,
+        ``G -> Nw`` and ``B -> LWC``. Classification is based on the sign of each
+        RGB component relative to the hexagram centre and the process signatures
+        defined in :mod:`mrrpropy.hexagram`.
         """
 
         if analysis is None or not isinstance(analysis, xr.Dataset):
@@ -3051,7 +3116,7 @@ class MRRProData:
         **kwargs,
     ) -> tuple[Figure, Path | None]:
         """
-        Plot-only temporal summary of classified rain processes.
+        Plot a temporal summary of the classified rain-process evolution.
 
         Panels
         ------
@@ -3065,7 +3130,8 @@ class MRRProData:
         - If a process exists in mrrpropy.hexagram.PROCESS_SIGNATURES, its signature is
         appended in the legend.
         - Colorbars live in fixed GridSpec columns, so subplot widths remain aligned.
-        - The function does not classify anything; it only visualizes `classified`.
+        - The function does not classify anything; it only visualizes
+          ``classified``.
         """
 
         from mrrpropy.hexagram import PROCESS_SIGNATURES, PROCESS_CODES
@@ -3284,7 +3350,7 @@ class MRRProData:
         **kwargs,
     ) -> tuple[Figure, Path | None]:
         """
-        Plot classified time samples on the RGB hexagram.
+        Plot classified samples on the RGB hexagram used by the package.
 
         Parameters
         ----------
@@ -3297,7 +3363,8 @@ class MRRProData:
         show_background : bool
             If True, show full RGB hexagram background.
         show_process_masks : bool
-            If True, overlay theoretical mask of each process from PROCESS_SIGNATURES.
+            If True, overlay the theoretical process masks derived from
+            ``PROCESS_SIGNATURES``.
         """
                 
         pcfg = self.plot_cfg

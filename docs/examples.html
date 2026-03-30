@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mrrpropy examples</title>
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header compact">
+    <div class="wrap">
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="getting-started.html">Getting started</a>
+        <a href="processing-workflow.html">Processing workflow</a>
+        <a href="examples.html">Examples</a>
+        <a href="api/mrrpropy.html">API reference</a>
+        <a href="contributing.html">Contributing</a>
+      </nav>
+      <h1>Examples</h1>
+    </div>
+  </header>
+
+  <main class="wrap prose">
+    <h2>Reflectivity quicklook</h2>
+    <p>
+      The quickest way to inspect a processed product is a time-range view of
+      <code>Ze</code> or another 2D field.
+    </p>
+    <pre><code>fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
+
+    <h2>Doppler spectrum and spectrogram</h2>
+    <p>
+      The package can extract a single-gate Doppler spectrum or a range-by-velocity
+      spectrogram for a selected time.
+    </p>
+    <pre><code>import datetime
+
+fig, path = mrr.plot_spectrum(
+    datetime.datetime(2025, 3, 8, 12, 50, 0),
+    target_range=2880.0,
+    spectrum_var="spectrum_raw",
+)
+
+fig, path = mrr.plot_spectrogram(
+    datetime.datetime(2025, 3, 8, 12, 50, 0),
+    spectrum_var="spectrum_raw",
+)</code></pre>
+
+    <h2>Microphysical process analysis</h2>
+    <p>
+      Layer-scale trends in <code>Dm</code>, <code>Nw</code> and <code>LWC</code>
+      can be projected to RGB and classified on the package hexagram.
+    </p>
+    <pre><code>analysis = mrr.rain_process_analyze(
+    period=(datetime.datetime(2025, 3, 8, 12, 0, 0), datetime.datetime(2025, 3, 8, 12, 10, 0)),
+    layer=(1000.0, 2000.0),
+    k=11,
+    ze_th=-5.0,
+    min_points_ols=10,
+    eps_q=0.01,
+    rgb_q=0.02,
+    vars_trend=("Dm", "Nw", "LWC"),
+)
+
+classified = mrr.classify_rain_process(analysis=analysis)
+
+fig, path = mrr.plot_classified_processes_on_hexagram(
+    classified=classified,
+    analysis=analysis,
+    savefig=False,
+)</code></pre>
+
+    <figure class="figure-card">
+      <img src="assets/hexagram_classification_example.png" alt="Hexagram classification example">
+      <figcaption>Example of classified rain-process samples plotted on the RGB hexagram.</figcaption>
+    </figure>
+  </main>
+</body>
+</html>

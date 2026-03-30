@@ -57,6 +57,29 @@ h1 {
   font-size: 1.1rem;
 }
 
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.75rem 1rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.button.secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 .nav {
   display: flex;
   flex-wrap: wrap;
@@ -82,8 +105,20 @@ a:hover {
   padding: 2rem 0 3rem;
 }
 
+.two-up {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr);
+  gap: 1rem;
+  padding: 2rem 0 1rem;
+}
+
 .card,
-.prose {
+.prose,
+.figure-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -92,6 +127,24 @@ a:hover {
 
 .card {
   padding: 1.25rem;
+}
+
+.figure-card {
+  padding: 1rem;
+}
+
+.figure-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.figure-card figcaption {
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .prose {
@@ -114,4 +167,14 @@ pre {
 
 ul {
   padding-left: 1.25rem;
+}
+
+ol {
+  padding-left: 1.25rem;
+}
+
+@media (max-width: 850px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
 }

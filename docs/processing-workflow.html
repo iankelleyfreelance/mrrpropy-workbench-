@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mrrpropy processing workflow</title>
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site-header compact">
+    <div class="wrap">
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="getting-started.html">Getting started</a>
+        <a href="processing-workflow.html">Processing workflow</a>
+        <a href="examples.html">Examples</a>
+        <a href="api/mrrpropy.html">API reference</a>
+        <a href="contributing.html">Contributing</a>
+      </nav>
+      <h1>Processing workflow</h1>
+    </div>
+  </header>
+
+  <main class="wrap prose">
+    <h2>Data flow</h2>
+    <ol>
+      <li>Load a raw MRR-PRO NetCDF file with <code>MRRProData.from_file()</code>.</li>
+      <li>Run or load the RaProMPro product.</li>
+      <li>Inspect processed fields such as <code>Ze</code>, <code>Za</code>, <code>DBPIA</code>, <code>Dm</code>, <code>Nw</code>, <code>LWC</code> and <code>RR</code>.</li>
+      <li>Use the plotting and analysis methods on the same object.</li>
+    </ol>
+
+    <h2>Processed outputs commonly used in analysis</h2>
+    <ul>
+      <li><code>Ze</code>: equivalent reflectivity corrected by PIA for drizzle/rain.</li>
+      <li><code>Zea</code>: equivalent attenuated reflectivity.</li>
+      <li><code>DBPIA</code>: path-integrated attenuation in dB.</li>
+      <li><code>Dm</code>, <code>Nw</code>, <code>LWC</code>, <code>RR</code>: microphysical variables used downstream by the analysis API.</li>
+    </ul>
+
+    <h2>Representative workflow</h2>
+    <pre><code>processed = mrr.process_raprompro_optimized(
+    save=False,
+    save_spe_3d=False,
+    save_dsd_3d=False,
+)
+
+fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
+
+    <h2>Microphysics workflow</h2>
+    <pre><code>from datetime import datetime
+
+analysis = mrr.rain_process_analyze(
+    period=(datetime(2025, 3, 8, 12, 0, 0), datetime(2025, 3, 8, 12, 10, 0)),
+    layer=(1000.0, 2000.0),
+    k=11,
+    ze_th=-5.0,
+    min_points_ols=10,
+    eps_q=0.01,
+    rgb_q=0.02,
+    vars_trend=("Dm", "Nw", "LWC"),
+)
+
+classified = mrr.classify_rain_process(analysis=analysis)</code></pre>
+  </main>
+</body>
+</html>
