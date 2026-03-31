@@ -1,6 +1,26 @@
 # mrrpropy
 MRR PRO code for processing and analysis.
 
+## Scientific references
+The retained RaProMPro processing implementation used for MRR-PRO data is associated
+with:
+
+- García-Benadí A, Bech J, Gonzalez S, Udina M, Codina B. A New Methodology to
+  Characterise the Radar Bright Band Using Doppler Spectral Moments from Vertically
+  Pointing Radar Observations. Remote Sensing. 2021;13(21):4323.
+  https://doi.org/10.3390/rs13214323
+
+The corresponding original code repository is:
+
+- https://github.com/AlbertGBena/RaProM-Pro
+
+For MRR-2 data, a related implementation is distributed separately as `RaProM.py`:
+
+- García-Benadí A, Bech J, Gonzalez S, Udina M, Codina B, Georgis JF.
+  Precipitation Type Classification of Micro Rain Radar Data Using an Improved
+  Doppler Spectral Processing Methodology. Remote Sensing. 2020;12(24):4113.
+  https://doi.org/10.3390/rs12244113
+
 ## Repository workflow
 This repository keeps the scientific processing code intact while standardizing the developer workflow around it.
 
