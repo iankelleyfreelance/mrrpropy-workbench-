@@ -14,6 +14,7 @@
         <a href="getting-started.html">Getting started</a>
         <a href="processing-workflow.html">Processing workflow</a>
         <a href="examples.html">Examples</a>
+        <a href="references.html">References</a>
         <a href="api/mrrpropy.html">API reference</a>
         <a href="contributing.html">Contributing</a>
       </nav>
@@ -40,7 +41,7 @@ mrr = MRRProData.from_file(raw_path)
 mrr.load_raprompro(processed_path)
 
 # Option 2: run the processing workflow
-# processed = mrr.process_raprompro_optimized(save=False)
+# processed = mrr.process_raprompro(save=False)
 
 fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
 
@@ -57,8 +58,7 @@ fig, path = mrr.plot_spectrum(
     <h2>When to process and when to load</h2>
     <ul>
       <li>Use <code>load_raprompro()</code> when a processed NetCDF already exists and you want fast access to diagnostics.</li>
-      <li>Use <code>process_raprompro_original()</code> or <code>process_raprompro_optimized()</code> when you need to generate the product from raw spectra.</li>
-      <li>The default <code>process_raprompro()</code> entry point currently delegates to the original wrapper path.</li>
+      <li>Use <code>process_raprompro()</code> when you need to generate the processed product from raw spectra.</li>
     </ul>
   </main>
 </body>

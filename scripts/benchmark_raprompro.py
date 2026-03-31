@@ -51,7 +51,7 @@ def _summarize(name: str, samples: list[float]) -> dict[str, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Benchmark process_raprompro_original vs process_raprompro_optimized."
+        description="Benchmark the canonical mrrpropy processing path."
     )
     parser.add_argument(
         "--raw-path",
@@ -93,11 +93,8 @@ def main() -> None:
     if args.repeats < 1:
         raise ValueError("--repeats must be at least 1.")
 
-    methods = [
-        "process_raprompro_original",
-        "process_raprompro_optimized",
-    ]
-    results: dict[str, list[float]] = {}
+    method_name = "process_raprompro"
+    results: list[float] = []
 
     print(f"RAW file: {raw_path}")
     print(
@@ -110,37 +107,25 @@ def main() -> None:
     )
     print()
 
-    for method_name in methods:
-        samples: list[float] = []
-        print(f"Running {method_name} ...")
-        for run_idx in range(1, args.repeats + 1):
-            elapsed = _run_once(
-                raw_path,
-                method_name,
-                save=args.save,
-                save_spe_3d=args.save_spe_3d,
-                save_dsd_3d=args.save_dsd_3d,
-            )
-            samples.append(elapsed)
-            print(f"  run {run_idx}: {elapsed:.3f} s")
-        results[method_name] = samples
-        summary = _summarize(method_name, samples)
-        print(
-            f"  summary: min={summary['min_s']:.3f} s, "
-            f"mean={summary['mean_s']:.3f} s, "
-            f"median={summary['median_s']:.3f} s, "
-            f"max={summary['max_s']:.3f} s"
+    print(f"Running {method_name} ...")
+    for run_idx in range(1, args.repeats + 1):
+        elapsed = _run_once(
+            raw_path,
+            method_name,
+            save=args.save,
+            save_spe_3d=args.save_spe_3d,
+            save_dsd_3d=args.save_dsd_3d,
         )
-        print()
+        results.append(elapsed)
+        print(f"  run {run_idx}: {elapsed:.3f} s")
 
-    original_mean = statistics.mean(results["process_raprompro_original"])
-    optimized_mean = statistics.mean(results["process_raprompro_optimized"])
-    speedup = original_mean / optimized_mean if optimized_mean > 0 else float("nan")
-
-    print("Comparison:")
-    print(f"  original mean : {original_mean:.3f} s")
-    print(f"  optimized mean: {optimized_mean:.3f} s")
-    print(f"  speedup       : {speedup:.3f}x")
+    summary = _summarize(method_name, results)
+    print()
+    print("Summary:")
+    print(f"  min   : {summary['min_s']:.3f} s")
+    print(f"  mean  : {summary['mean_s']:.3f} s")
+    print(f"  median: {summary['median_s']:.3f} s")
+    print(f"  max   : {summary['max_s']:.3f} s")
 
 
 if __name__ == "__main__":

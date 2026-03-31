@@ -53,7 +53,8 @@ The test suite is organized into:
 Bundled NetCDF files under `tests/data/` remain the reference fixtures. Generated outputs should go to ignored test output directories, not back into tracked fixture paths.
 
 ## Benchmarking
-For quick performance checks, use the bundled 10-minute RAW subset:
+For quick performance checks of the canonical processing path, use the bundled
+10-minute RAW subset:
 
 ```bash
 uv run python scripts/benchmark_raprompro.py --quick --repeats 1

@@ -8,8 +8,8 @@ dataset and exposes three main workflows:
 2. Run or load RaProMPro processed products.
 3. Generate diagnostic plots and rain-process analyses from processed variables.
 
-The lower-level scientific kernels remain in the ``RaProMPro_*`` modules. This
-module provides the user-facing interface built on top of them.
+The lower-level scientific processing kernel retained by the package is wrapped
+here through a user-facing interface built on top of xarray and matplotlib.
 """
 
 from __future__ import annotations
@@ -29,11 +29,8 @@ import pandas as pd
 import xarray as xr
 from datetime import datetime
 
-import mrrpropy.RaProMPro_original as rpm_original
 import mrrpropy.RaProMPro_optimized as rpm_optimized
-from mrrpropy.utils import (
-    ols_slope_intercept_r2,
-    compute_eps )
+from mrrpropy.utils import ols_slope_intercept_r2, compute_eps
 from mrrpropy.hexagram import (
     build_rgb_from_trends,
     map_rgb_to_hexagram,
@@ -41,8 +38,8 @@ from mrrpropy.hexagram import (
     get_process_hexagram_mask,
     PROCESS_SIGNATURES,
     PROCESS_CODES,
-    PROCESS_MARKERS
-    )
+    PROCESS_MARKERS,
+)
 
 DatetimeLike = Union[str, np.datetime64, datetime]
 
@@ -84,7 +81,7 @@ class PlotConfig:
     figsize_quicklook: tuple[float, float] = (16, 8)
     figsize_spectrogram: tuple[float, float] = (10, 14)
     figsize_profiles: tuple[float, float] = (14, 10)
-    figsize_multipanel: tuple[float, float] = (14, 10) 
+    figsize_multipanel: tuple[float, float] = (14, 10)
     cmap: str = "jet"
     marker: str = "o"
     markersize: float = 10.0
@@ -120,8 +117,6 @@ class MRRProData:
     def __post_init__(self) -> None:
         self.path = Path(self.path)
         self.raprompro: xr.Dataset | None = None
-        self.raprompro_original: xr.Dataset | None = None
-        self.raprompro_optimized: xr.Dataset | None = None
 
     # -------------------------
     # Constructors
@@ -309,42 +304,11 @@ class MRRProData:
         **kwargs: Any,
     ) -> xr.Dataset:
         """
-        Backward-compatible processing entry point.
+        Run the canonical RaProMPro processing path used by the package.
 
-        This method currently delegates to :meth:`process_raprompro_original`.
-        Use :meth:`process_raprompro_optimized` explicitly if you want the
-        optimized wrapper path that is being validated against the reference
-        scientific implementation.
+        This is the default processing entry point for ``mrrpropy``.
         """
-        return self.process_raprompro_original(*args, **kwargs)
-
-    def process_raprompro_original(
-        self,
-        *,
-        adjust_m: float = 1.0,
-        save_spe_3d: bool = False,
-        save_dsd_3d: bool = False,
-        save: bool = False,
-        **kwargs,
-    ) -> xr.Dataset:
-        """
-        Run the reference RaProMPro wrapper and return a processed dataset.
-
-        This is the stable path that mirrors the published scientific workflow as
-        closely as possible. It is the safest choice when exact reference
-        behaviour matters more than runtime.
-        """
-        out = self._process_raprompro_impl(
-            cache_attr="raprompro_original",
-            rpm_module=rpm_original,
-            adjust_m=adjust_m,
-            save_spe_3d=save_spe_3d,
-            save_dsd_3d=save_dsd_3d,
-            save=save,
-            **kwargs,
-        )
-        self.raprompro = out
-        return out
+        return self._process_raprompro_impl(*args, **kwargs)
 
     def process_raprompro_optimized(
         self,
@@ -356,16 +320,9 @@ class MRRProData:
         **kwargs,
     ) -> xr.Dataset:
         """
-        Run the optimized RaProMPro wrapper path and return a processed dataset.
-
-        This path keeps the same scientific outputs as the reference workflow
-        while reducing Python-side overhead where possible. It is intended to be
-        checked against the equivalence tests before being used as a drop-in
-        replacement for the reference path.
+        Compatibility alias for :meth:`process_raprompro`.
         """
-        return self._process_raprompro_impl(
-            cache_attr="raprompro_optimized",
-            rpm_module=rpm_optimized,
+        return self.process_raprompro(
             adjust_m=adjust_m,
             save_spe_3d=save_spe_3d,
             save_dsd_3d=save_dsd_3d,
@@ -376,8 +333,6 @@ class MRRProData:
     def _process_raprompro_impl(
         self,
         *,
-        cache_attr: str,
-        rpm_module: Any,
         adjust_m: float = 1.0,
         save_spe_3d: bool = False,
         save_dsd_3d: bool = False,
@@ -385,19 +340,18 @@ class MRRProData:
         **kwargs: Any,
     ) -> xr.Dataset:
         """
-        Internal implementation shared by the original and optimized wrapper paths.
+        Internal implementation of the canonical RaProMPro processing wrapper.
 
         The resulting dataset follows the variable naming used by the scientific
         RaProMPro workflow, including fields such as ``Type``, ``DBPIA``, ``Za``,
         ``Zea``, ``Ze``, ``Dm``, ``Nw``, ``LWC`` and ``RR``.
         """
-        cached = getattr(self, cache_attr)
-        if cached is not None:
-            return cached
+        if self.raprompro is not None:
+            return self.raprompro
 
         ds = self.ds
-        rpm = rpm_module
-        use_preallocated_accumulators = cache_attr == "raprompro_optimized"
+        rpm = rpm_optimized
+        use_preallocated_accumulators = True
 
         # -------------------------
         # 0) Validate minimal inputs
@@ -577,6 +531,7 @@ class MRRProData:
 
         # Full matrices (time, range)
         if use_preallocated_accumulators:
+
             def _empty_2d() -> np.ndarray:
                 return np.full((ntime, Nhei), np.nan, dtype=float)
 
@@ -655,7 +610,11 @@ class MRRProData:
                 raw_db = _spectra_db_at_time(it, "spectrum_raw")  # (range, bins)
                 # Loop over ranges exactly as CLI
                 for k in range(Nhei):
-                    COL_db = raw_db[k, :] if use_preallocated_accumulators else np.asarray(raw_db[k, :], dtype=float)
+                    COL_db = (
+                        raw_db[k, :]
+                        if use_preallocated_accumulators
+                        else np.asarray(raw_db[k, :], dtype=float)
+                    )
                     if np.isnan(COL_db).all():
                         if not use_preallocated_accumulators:
                             NewNoise.append(np.nan)
@@ -686,7 +645,11 @@ class MRRProData:
             else:
                 ref_db = _spectra_db_at_time(it, "spectrum_reflectivity")
                 for k in range(Nhei):
-                    COL_db = ref_db[k, :] if use_preallocated_accumulators else np.asarray(ref_db[k, :], dtype=float)
+                    COL_db = (
+                        ref_db[k, :]
+                        if use_preallocated_accumulators
+                        else np.asarray(ref_db[k, :], dtype=float)
+                    )
                     if np.isnan(COL_db).all():
                         if not use_preallocated_accumulators:
                             Pot.append(np.full(Nbins, np.nan))
@@ -892,6 +855,7 @@ class MRRProData:
                 SNR_full[it, :] = snr_arr
                 N_da_full[it, :] = DSD_arr
             else:
+
                 def _stack(prev, cur):
                     cur = np.asarray(cur, dtype=float)
                     return cur if prev is None else np.vstack((prev, cur))
@@ -1171,7 +1135,7 @@ class MRRProData:
                 },
             )
 
-        setattr(self, cache_attr, out)
+        self.raprompro = out
         if save:
             output_dir = kwargs.get("output_dir", Path.cwd())
             filename = kwargs.get("filename", f"{self.path.stem}_raprompro.nc")
@@ -1193,7 +1157,7 @@ class MRRProData:
         """
         if self.raprompro is None:
             return False
-        
+
         return all(v in self.raprompro.data_vars for v in required)
 
     # -------------------------
@@ -1290,7 +1254,7 @@ class MRRProData:
                     )
 
         if assign:
-            self.raprompro = ds_rp            
+            self.raprompro = ds_rp
 
         return ds_rp
 
@@ -1397,14 +1361,14 @@ class MRRProData:
         """
         ds = self.ds
 
-        if spectrum_var not in ds:            
+        if spectrum_var not in ds:
             if spectrum_var not in self.raprompro:
                 raise KeyError(f"'{spectrum_var}' not found.")
             else:
                 ds = self.raprompro
         else:
             ds = self.ds
-        
+
         da = ds[spectrum_var]
 
         t_sel = da["time"].sel(time=target_datetime, method="nearest").values
@@ -1419,18 +1383,18 @@ class MRRProData:
 
         ranges = ds["range"].sel(range=slice(r0, r1)).values.astype(float)
 
-        #Spectrum 
-        if 'spectrum_n_samples' in da.sizes:
+        # Spectrum
+        if "spectrum_n_samples" in da.sizes:
             n_bins = da.sizes["spectrum_n_samples"]
             if n_bins is None:
                 raise ValueError(f"spectrum_n_samples not found in Dataset.")
             vel = self._get_velocity_axis(int(n_bins))
         else:
-            if 'speed' in self.raprompro:
+            if "speed" in self.raprompro:
                 vel = self.raprompro["speed"]
             else:
                 raise ValueError(f"velocity not found in raprompro Dataset.")
-        
+
         # Caso A: cubo (time, range, bin)
         if ("time" in da.dims) and ("range" in da.dims):
             spec2d = da.sel(time=t_sel, range=slice(r0, r1)).values.astype(float)
@@ -1463,7 +1427,7 @@ class MRRProData:
     def quicklook(
         self,
         variable: str = "Ze",
-        source: str = 'raprompro',
+        source: str = "raprompro",
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
         **kwargs: Any,
@@ -1494,8 +1458,8 @@ class MRRProData:
         cmap = kwargs.get("cmap", pcfg.cmap)
         figsize = kwargs.get("figsize", pcfg.figsize_quicklook)
 
-        if source == 'raw':
-            if variable not in self.ds:            
+        if source == "raw":
+            if variable not in self.ds:
                 raise KeyError(f"Variable '{variable}' not found in raw Dataset.")
             else:
                 da = self.ds[variable]  # dims: (time, range)
@@ -1926,7 +1890,7 @@ class MRRProData:
         ax.set_ylabel("Range [m]")
         title = f"MRR-PRO spectrogram \n {t_txt}"
         ax.set_title(title)
-        ax.set_xlim(kwargs.get('x_limits', (-4, 12)))
+        ax.set_xlim(kwargs.get("x_limits", (-4, 12)))
 
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label(f"Spectrum [{units}]" if units else "Spectrum")
@@ -1955,15 +1919,17 @@ class MRRProData:
         vmax: float | None = None,
         savefig: bool = False,
         output_dir: Path | None = None,
-        **kwargs
-        ):
+        **kwargs,
+    ):
         """
         DSD-gram: X=DropSize (mm), Y=range (m), color=dsd_3D, a un instante target_datetime.
 
         Requiere self.raprompro con variable 'dsd_3D' dims ('time','range','DropSize').
         """
         if self.raprompro is None:
-            raise RuntimeError("self.raprompro no está cargado. Usa load_raprompro() o procesa antes.")
+            raise RuntimeError(
+                "self.raprompro no está cargado. Usa load_raprompro() o procesa antes."
+            )
 
         pcfg = self.plot_cfg
         dpi = kwargs.get("dpi", pcfg.dpi)
@@ -1982,7 +1948,9 @@ class MRRProData:
             raise ValueError(f"dsd_3D.dims esperadas {expected}, pero son {da.dims}")
 
         # Selección temporal (análoga a spectrogram: instante concreto)
-        da2 = da.sel(time=target_datetime, method="nearest")  # dims -> (range, DropSize)
+        da2 = da.sel(
+            time=target_datetime, method="nearest"
+        )  # dims -> (range, DropSize)
 
         # Subsets opcionales
         if range_limits is not None:
@@ -1993,29 +1961,33 @@ class MRRProData:
         # Asegura orden para plot: (range, DropSize)
         da2 = da2.transpose("range", "DropSize")
 
-        #Remove NaN in 'DropSize' in da2
-        X_ = da2["DropSize"].values  # mm        
+        # Remove NaN in 'DropSize' in da2
+        X_ = da2["DropSize"].values  # mm
         da2 = da2.isel({"DropSize": np.isfinite(X_)})
-        
+
         # Ejes
-        X = da2["DropSize"].values  # mm        
-        Y = da2["range"].values     # m
+        X = da2["DropSize"].values  # mm
+        Y = da2["range"].values  # m
         Z = da2.values.astype(float)
 
         # OJO: en tu pipeline suele venir ya en log10, así que aquí NO aplico log10.
         # Si algún día guardas en lineal, mejor añadir un flag explícito.
-        
+
         fig, ax = plt.subplots(figsize=figsize)
 
-        # pcolormesh con X/Y 1D y shading auto evita el error clásico de incompatibilidad        
+        # pcolormesh con X/Y 1D y shading auto evita el error clásico de incompatibilidad
         m = ax.pcolormesh(X, Y, Z, shading="auto", vmin=vmin, vmax=vmax, cmap=cmap)
 
         ax.set_xlabel("Drop diameter (mm)")
         ax.set_ylabel("Range / Height (m)")
-        ax.set_xlim(kwargs.get('x_limits', (0.25, 10)))
+        ax.set_xlim(kwargs.get("x_limits", (0.25, 10)))
         # Título con el tiempo realmente seleccionado (nearest)
         tsel = da2["time"].values
-        tlabel = np.datetime_as_string(tsel, unit="s") if np.issubdtype(np.asarray(tsel).dtype, np.datetime64) else str(tsel)
+        tlabel = (
+            np.datetime_as_string(tsel, unit="s")
+            if np.issubdtype(np.asarray(tsel).dtype, np.datetime64)
+            else str(tsel)
+        )
         ax.set_title(f"DSD-gram \n {tlabel}")
 
         cb = fig.colorbar(m, ax=ax)
@@ -2091,7 +2063,9 @@ class MRRProData:
             raise RuntimeError("raprompro not loaded. Use load_raprompro().")
         ds_rp = self.raprompro
         if "dsd_3D" not in ds_rp:
-            raise KeyError("raprompro missing required variable 'dsd_3D'. Check save_dsd_3d is True.")
+            raise KeyError(
+                "raprompro missing required variable 'dsd_3D'. Check save_dsd_3d is True."
+            )
         da = ds_rp["dsd_3D"]
 
         # dims esperadas
@@ -2115,7 +2089,7 @@ class MRRProData:
         ranges_in = np.asarray(ranges, dtype=float)
         if ranges_in.size == 0:
             raise ValueError("ranges must contain at least one value.")
-                
+
         # --- colormap colors ---
         cm = plt.get_cmap(cmap)
         colors = [cm(i / max(1, ranges_in.size - 1)) for i in range(ranges_in.size)]
@@ -2145,7 +2119,9 @@ class MRRProData:
         N_minimum_thresh = float(kwargs.get("N_minimum_threshold", 0.0))
 
         for i, r_req in enumerate(ranges_in):
-            r_sel = float(ds_rp["range"].sel(range=r_req, method="nearest").values.item())
+            r_sel = float(
+                ds_rp["range"].sel(range=r_req, method="nearest").values.item()
+            )
 
             # Extrae el perfil N(D) a ese tiempo y rango
             # da_sel dims -> (DropSize,)
@@ -2224,11 +2200,12 @@ class MRRProData:
                 raise ValueError("output_dir must be provided if savefig=True.")
             output_dir.mkdir(parents=True, exist_ok=True)
             ttag = np.datetime_as_string(t_sel, unit="s").replace(":", "")
-            filepath = output_dir / self.path.name.replace(".nc", f"_DSD_by_range_{ttag}.png")
+            filepath = output_dir / self.path.name.replace(
+                ".nc", f"_DSD_by_range_{ttag}.png"
+            )
             fig.savefig(filepath, dpi=dpi)
 
         return fig, filepath
-
 
     def plot_microphysical_properties_profiles(
         self,
@@ -2248,7 +2225,7 @@ class MRRProData:
         Raises if the dataset does not look RaProMPro-preprocessed.
         """
         # --- minimal "preprocessed?" check ---
-        
+
         if self._is_processed():
             preprocessed_status = "RaProMPro-preprocessed"
         else:
@@ -2284,13 +2261,20 @@ class MRRProData:
         # 1) Reflectivities
         ax = axs[0]
         Z_variables = ["Ze", "Za", "Zea", "Z_all"]
-        markers = {'Ze': 'x', "Za": 'v', 'Zea': 'o', 'Z_all': '^'}
+        markers = {"Ze": "x", "Za": "v", "Zea": "o", "Z_all": "^"}
         for Z_ in Z_variables:
             if Z_ not in prof.data_vars:
                 continue
             # if Z_ is 'Ze':
             #     breakpoint()
-            ax.plot(prof[Z_].values, z, label=Z_, linewidth=1, marker=markers[Z_], markersize=4)
+            ax.plot(
+                prof[Z_].values,
+                z,
+                label=Z_,
+                linewidth=1,
+                marker=markers[Z_],
+                markersize=4,
+            )
 
         ax.set_xlabel("Reflectivities, dBZ")
         ax.set_ylabel(f"{'range'} (km)")
@@ -2309,7 +2293,7 @@ class MRRProData:
         ax = axs[2]
         ax.plot(prof["Nw"].values, z, linewidth=1, marker="o", markersize=4)
         ax.set_xlabel(r"$log_{10}(N_w \, mm^{-1} m^{-3})$")
-        ax.set_xlim(kwargs.get("Nw_limits", (0., 6.0)))
+        ax.set_xlim(kwargs.get("Nw_limits", (0.0, 6.0)))
         ax.grid(True)
 
         # 4) LWC
@@ -2375,7 +2359,7 @@ class MRRProData:
     ) -> tuple[Figure, Path | None]:
         """
         Plots the rain process in a specified atmospheric layer at a given datetime.
-        This method generates a scatter plot of two selected variables (x and y) from the dataset,        
+        This method generates a scatter plot of two selected variables (x and y) from the dataset,
         vertical layer. The plot can optionally be saved to disk.
         Parameters
         ----------
@@ -2413,10 +2397,10 @@ class MRRProData:
         if self._is_processed():
             ds = self.raprompro
         else:
-            raise RuntimeError('Dataset is not processed.')
-        
+            raise RuntimeError("Dataset is not processed.")
+
         pcfg = self.plot_cfg
-        figsize = kwargs.get('figsize', pcfg.figsize)
+        figsize = kwargs.get("figsize", pcfg.figsize)
 
         # Check x,y,z exists as variable in self.ds, otherwise raise error
         for var in (x, y, z):
@@ -2511,7 +2495,6 @@ class MRRProData:
 
         return fig, output_path if savefig else None
 
-
     def compute_layer_trend_ols(
         self,
         *,
@@ -2553,7 +2536,9 @@ class MRRProData:
         if "range" not in layer.coords:
             raise KeyError("Missing coord 'range' in dataset.")
         if variable_threshold not in layer:
-            raise KeyError(f"Missing threshold variable '{variable_threshold}' in dataset.")
+            raise KeyError(
+                f"Missing threshold variable '{variable_threshold}' in dataset."
+            )
 
         # Ensure required variables exist
         for vname in vars:
@@ -2567,7 +2552,9 @@ class MRRProData:
 
         # --- Threshold mask (common) ---
         Ze = layer[variable_threshold]
-        ze_mask = xr.where(np.isfinite(Ze) & (Ze > threshold_value), True, False)  # (time, range)
+        ze_mask = xr.where(
+            np.isfinite(Ze) & (Ze > threshold_value), True, False
+        )  # (time, range)
 
         # --- Output dataset with traceability coords ---
         out = xr.Dataset(
@@ -2679,10 +2666,11 @@ class MRRProData:
 
             out[f"eps_{vname}"] = xr.DataArray(eps_used, dims=(time_dim,))
             out[f"n_fit_{vname}"] = xr.DataArray(n_fit, dims=(time_dim,))
-            out[f"mask_fit_{vname}"] = xr.DataArray(mask_fit, dims=(time_dim, "range_layer"))
+            out[f"mask_fit_{vname}"] = xr.DataArray(
+                mask_fit, dims=(time_dim, "range_layer")
+            )
 
         return out
-    
 
     def rain_process_analyze(
         self,
@@ -2741,7 +2729,9 @@ class MRRProData:
         )
 
         # IMPORTANT: recorta trends al periodo solicitado (compute_layer_trend_ols usa todo el fichero)
-        trends = trends.sel(time=slice(ds_sub["time"].values[0], ds_sub["time"].values[-1]))
+        trends = trends.sel(
+            time=slice(ds_sub["time"].values[0], ds_sub["time"].values[-1])
+        )
 
         # 2) RGB (convención actual de tu plot: vars_trend en orden (Dm, Nw, LWC) -> (R,G,B) según tu build)
         rgb = build_rgb_from_trends(
@@ -2761,7 +2751,7 @@ class MRRProData:
         hex_ds = map_rgb_to_hexagram(rgb, hex_assets=hex_assets)
 
         # 4) merge outputs
-        out = xr.Dataset(coords={"time": rgb["time"].values})        
+        out = xr.Dataset(coords={"time": rgb["time"].values})
 
         # trends: añade todo salvo coords “range_layer/depth” si no quieres inflar demasiado
         # (Yo lo incluyo porque tú querías trazabilidad)
@@ -2776,7 +2766,7 @@ class MRRProData:
         out["R"] = rgb["R"]
         out["G"] = rgb["G"]
         out["B"] = rgb["B"]
-        out["minutes"] = xr.DataArray(minutes, dims=("time",))        
+        out["minutes"] = xr.DataArray(minutes, dims=("time",))
 
         # Hex mapping
         for v in hex_ds.data_vars:
@@ -2785,8 +2775,12 @@ class MRRProData:
         # metadata del análisis
         out.attrs.update(
             dict(
-                period_start=str(np.datetime_as_string(ds_sub["time"].values[0], unit="s")),
-                period_end=str(np.datetime_as_string(ds_sub["time"].values[-1], unit="s")),
+                period_start=str(
+                    np.datetime_as_string(ds_sub["time"].values[0], unit="s")
+                ),
+                period_end=str(
+                    np.datetime_as_string(ds_sub["time"].values[-1], unit="s")
+                ),
                 z_top=float(z_top),
                 z_base=float(z_base),
                 k=int(k),
@@ -2795,8 +2789,9 @@ class MRRProData:
                 eps_q=float(eps_q),
                 rgb_q=float(rgb_q),
                 vars_trend=tuple(vars_trend),
-                rgb_convention=str(f"R={vars_trend[0]}, G={vars_trend[1]}, B={vars_trend[2]}")
-                                   
+                rgb_convention=str(
+                    f"R={vars_trend[0]}, G={vars_trend[1]}, B={vars_trend[2]}"
+                ),
             )
         )
         out.attrs["rgb_mapping"] = {
@@ -2804,9 +2799,8 @@ class MRRProData:
             "G": vars_trend[1],
             "B": vars_trend[2],
         }
-        out.attrs["strength_definition"] = "min(|RGB-0.5|)/0.5"        
+        out.attrs["strength_definition"] = "min(|RGB-0.5|)/0.5"
         return out
-
 
     def plot_rain_process_in_layer_hexagram(
         self,
@@ -2848,15 +2842,17 @@ class MRRProData:
 
         # --- checks mínimos ---
         if analysis is None or not isinstance(analysis, xr.Dataset):
-            raise TypeError("analysis debe ser un xr.Dataset (salida de rain_process_analyze).")
+            raise TypeError(
+                "analysis debe ser un xr.Dataset (salida de rain_process_analyze)."
+            )
 
         required = ("hex_x", "hex_y", "minutes", "R", "G", "B")
         missing = [v for v in required if v not in analysis]
         if missing:
             raise KeyError(f"analysis no contiene variables requeridas: {missing}")
 
-        # --- assets (img + LUT) ---        
-        k  = analysis.attrs['k']
+        # --- assets (img + LUT) ---
+        k = analysis.attrs["k"]
         hex_assets = get_hexagram_assets(k=k)
         img = hex_assets["img"]
         ny, nx = img.shape[:2]
@@ -2866,7 +2862,9 @@ class MRRProData:
         hy = analysis["hex_y"].values.astype(float)
         minutes = analysis["minutes"].values.astype(float)
 
-        if use_snapped_colors and all(v in analysis for v in ("snap_R", "snap_G", "snap_B")):
+        if use_snapped_colors and all(
+            v in analysis for v in ("snap_R", "snap_G", "snap_B")
+        ):
             cols = np.stack(
                 [
                     analysis["snap_R"].values,
@@ -2962,14 +2960,18 @@ class MRRProData:
             safe_t0 = (t0s or "t0").replace(":", "").replace("-", "").replace(" ", "_")
             safe_t1 = (t1s or "t1").replace(":", "").replace("-", "").replace(" ", "_")
             safe_layer = (
-                f"{float(z_top):.0f}-{float(z_base):.0f}m" if (z_top is not None and z_base is not None) else "layer"
+                f"{float(z_top):.0f}-{float(z_base):.0f}m"
+                if (z_top is not None and z_base is not None)
+                else "layer"
             )
 
-            filepath = output_dir / f"rain_process_hex_{safe_t0}_{safe_t1}_{safe_layer}_k{k}.png"
+            filepath = (
+                output_dir
+                / f"rain_process_hex_{safe_t0}_{safe_t1}_{safe_layer}_k{k}.png"
+            )
             fig.savefig(filepath, dpi=dpi)
 
         return fig, filepath
-
 
     def classify_rain_process(
         self,
@@ -2989,18 +2991,24 @@ class MRRProData:
         """
 
         if analysis is None or not isinstance(analysis, xr.Dataset):
-            raise TypeError("analysis debe ser un xr.Dataset (salida de rain_process_analyze).")
+            raise TypeError(
+                "analysis debe ser un xr.Dataset (salida de rain_process_analyze)."
+            )
         if "time" not in analysis.coords:
             raise KeyError("analysis debe tener coord 'time'.")
         for v in ("R", "G", "B"):
             if v not in analysis:
-                raise KeyError("analysis debe incluir R,G,B (decisión tomada en rain_process_analyze).")
+                raise KeyError(
+                    "analysis debe incluir R,G,B (decisión tomada en rain_process_analyze)."
+                )
 
         # El clasificador está calibrado para este mapping
         expected = {"R": "Dm", "G": "Nw", "B": "LWC"}
         rgb_map = analysis.attrs.get("rgb_mapping", None)
         if rgb_map != expected:
-            raise ValueError(f"rgb_mapping={rgb_map} pero este clasificador espera {expected}.")
+            raise ValueError(
+                f"rgb_mapping={rgb_map} pero este clasificador espera {expected}."
+            )
 
         R = analysis["R"].values.astype(float)
         G = analysis["G"].values.astype(float)
@@ -3027,11 +3035,13 @@ class MRRProData:
 
         strg = np.zeros(R.shape, dtype=float)
         if np.any(ok):
-            strg[ok] = np.minimum.reduce([
-                _strength(R[ok]),
-                _strength(G[ok]),
-                _strength(B[ok]),
-            ])
+            strg[ok] = np.minimum.reduce(
+                [
+                    _strength(R[ok]),
+                    _strength(G[ok]),
+                    _strength(B[ok]),
+                ]
+            )
 
         # start labels
         label = np.full(R.shape, "no_data", dtype=object)
@@ -3080,7 +3090,15 @@ class MRRProData:
         out["B"] = analysis["B"]
 
         # copy optional vars useful for plotting
-        for v in ("hex_x", "hex_y", "hex_area", "minutes", "snap_R", "snap_G", "snap_B"):
+        for v in (
+            "hex_x",
+            "hex_y",
+            "hex_area",
+            "minutes",
+            "snap_R",
+            "snap_G",
+            "snap_B",
+        ):
             if v in analysis:
                 out[v] = analysis[v]
 
@@ -3219,7 +3237,9 @@ class MRRProData:
         uniq = ordered_labels + extra_labels
 
         if len(uniq) > 26:
-            raise ValueError("Hay más de 26 categorías de proceso; A,B,C... ya no basta.")
+            raise ValueError(
+                "Hay más de 26 categorías de proceso; A,B,C... ya no basta."
+            )
 
         # Map process label -> display code
         map_code = {lab: PROCESS_CODES.get(lab, lab.upper()) for lab in uniq}
@@ -3366,14 +3386,13 @@ class MRRProData:
             If True, overlay the theoretical process masks derived from
             ``PROCESS_SIGNATURES``.
         """
-                
+
         pcfg = self.plot_cfg
         figsize = kwargs.get("figsize", pcfg.figsize_hex)
         dpi = kwargs.get("dpi", pcfg.dpi)
         alpha_hexagram = kwargs.get("alpha_hexagram", pcfg.alpha_hexagram)
         alpha_mask = kwargs.get("alpha_mask", 0.18)
         markersize = kwargs.get("markersize", 35.0)
-
 
         if not isinstance(classified, xr.Dataset):
             raise TypeError("classified must be an xr.Dataset.")
@@ -3423,7 +3442,7 @@ class MRRProData:
                 mask2d, _ = get_process_hexagram_mask(
                     proc,
                     k=k,
-                    tol_center=classified.attrs['tol_center'],
+                    tol_center=classified.attrs["tol_center"],
                 )
 
                 color = process_colors.get(proc, "#000000")
@@ -3459,14 +3478,14 @@ class MRRProData:
             code = PROCESS_CODES.get(lab, lab.upper())
 
             marker = PROCESS_MARKERS.get(lab, "o")
-            
+
             strength = classified["strength"].values.astype(float)
 
             sc = ax.scatter(
                 hx[m],
                 hy[m],
                 s=markersize,
-                c=strength[m],           # color = strength
+                c=strength[m],  # color = strength
                 cmap=kwargs.get("cmap", "viridis"),
                 vmin=0.0,
                 vmax=1.0,
@@ -3475,7 +3494,7 @@ class MRRProData:
                 linewidths=0.3,
                 alpha=0.95,
                 label=PROCESS_CODES.get(lab, lab.upper()),
-            )            
+            )
             handles.append(sc)
 
         cbar = fig.colorbar(sc, ax=ax)
@@ -3502,7 +3521,9 @@ class MRRProData:
             t1 = classified["time"].values[-1]
             t0s = np.datetime_as_string(t0, unit="s").replace(":", "")
             t1s = np.datetime_as_string(t1, unit="s").replace(":", "")
-            filepath = output_dir / f"classified_processes_hexagram_{t0s}_{t1s}_k{k}.png"
+            filepath = (
+                output_dir / f"classified_processes_hexagram_{t0s}_{t1s}_k{k}.png"
+            )
             fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-        return fig, filepath        
+        return fig, filepath

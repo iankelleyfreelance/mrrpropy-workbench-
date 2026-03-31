@@ -1,3 +1,36 @@
+"""
+Optimization branch of the RaProMPro processing chain for METEK MRR-PRO data.
+
+This module starts from the retained scientific reference implementation and is used
+for controlled performance work inside `mrrpropy`. Any changes here are intended to
+preserve scientific outputs while improving runtime or maintainability, and they are
+validated against the reference path through dedicated equivalence tests.
+
+Scientific references
+---------------------
+- García-Benadí A, Bech J, Gonzalez S, Udina M, Codina B.
+  A New Methodology to Characterise the Radar Bright Band Using Doppler Spectral
+  Moments from Vertically Pointing Radar Observations.
+  Remote Sensing. 2021;13(21):4323.
+  https://doi.org/10.3390/rs13214323
+
+- García-Benadí A, Bech J, Gonzalez S, Udina M, Codina B, Georgis JF.
+  Precipitation Type Classification of Micro Rain Radar Data Using an Improved
+  Doppler Spectral Processing Methodology.
+  Remote Sensing. 2020;12(24):4113.
+  https://doi.org/10.3390/rs12244113
+
+Original upstream code
+----------------------
+https://github.com/AlbertGBena/RaProM-Pro
+
+Notes
+-----
+This file is not the upstream source of truth. It is the local optimization branch
+maintained in this repository for benchmarked, test-guarded improvements relative to
+`RaProMPro_original.py`.
+"""
+
 ##SCRIPT FOR READING AND PROCESSING DATA FROM MRR PRO IN A FOLDER
 ##The script is compatible with spectrum_raw and spectrum_reflectivity
 ##202405- The new version includes the improve definitions and the M value to adjust the calibration constant
