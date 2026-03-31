@@ -50,6 +50,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 .black-cache/
+workbench/
 cover/
 
 #Folder tests
@@ -59,8 +60,6 @@ tests/figures/
 tests/figures/**
 tests/generated/
 tests/generated/**
-tests/**/gaia*.py
-test_quickplot_*.png
 
 # Translations
 *.mo
