@@ -54,6 +54,8 @@ def test_raprompro_original_vs_optimized_equivalence(raw_dataset_path: Path) -> 
 
             diff = np.abs(left[mask] - right[mask])
             assert float(np.nanmax(diff)) <= 1e-10, f"Max abs diff too large for {name}"
-            assert float(np.nanmean(diff)) <= 1e-12, f"Mean abs diff too large for {name}"
+            assert (
+                float(np.nanmean(diff)) <= 1e-12
+            ), f"Mean abs diff too large for {name}"
     finally:
         mrr.close()

@@ -34,7 +34,9 @@ def test_transmittance_correction_increases_reflectivity_when_pia_applies(
         & (dbpia < 0.0)
     )
 
-    assert corrected_mask.any(), "No liquid points with attenuation correction were found."
+    assert (
+        corrected_mask.any()
+    ), "No liquid points with attenuation correction were found."
 
     delta = ze - zea
     assert np.nanmin(delta[corrected_mask]) >= -1e-6
@@ -88,7 +90,11 @@ def test_plot_microphysical_properties_profiles_runs(
 ):
     pytest.importorskip("matplotlib")
 
-    fig, axs, filepath = raprompro_subset_10min_loaded_mrr.plot_microphysical_properties_profiles(
+    (
+        fig,
+        axs,
+        filepath,
+    ) = raprompro_subset_10min_loaded_mrr.plot_microphysical_properties_profiles(
         target_datetime=datetime.datetime(2025, 3, 8, 12, 50, 0),
         savefig=True,
         output_dir=artifact_dir,

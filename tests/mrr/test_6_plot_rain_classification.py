@@ -58,7 +58,10 @@ def test_plot_rain_process_in_layer_2d(raprompro_subset_10min_loaded_mrr, artifa
 def test_plot_rain_process_in_layer_hexagram(
     raprompro_subset_10min_loaded_mrr, analysis, artifact_dir
 ):
-    fig, filepath = raprompro_subset_10min_loaded_mrr.plot_rain_process_in_layer_hexagram(
+    (
+        fig,
+        filepath,
+    ) = raprompro_subset_10min_loaded_mrr.plot_rain_process_in_layer_hexagram(
         analysis=analysis,
         savefig=True,
         output_dir=artifact_dir,

@@ -111,11 +111,15 @@ def test_process_raprompro_regression(
 
     for v0, v1, units in KEY_REGRESSION_PAIRS:
         if v0 not in raw_dataset or v1 not in generated_raprompro_dataset:
-            pytest.fail(f"Missing regression variable pair {v0}->{v1} in generated output")
+            pytest.fail(
+                f"Missing regression variable pair {v0}->{v1} in generated output"
+            )
         if v1 not in raprompro_reference_dataset:
             pytest.fail(f"Missing reference variable {v1} in raprompro reference file")
 
-        raw_var, generated_var = _align_2d(raw_dataset[v0], generated_raprompro_dataset[v1])
+        raw_var, generated_var = _align_2d(
+            raw_dataset[v0], generated_raprompro_dataset[v1]
+        )
         _, reference_var = _align_2d(raw_var, raprompro_reference_dataset[v1])
 
         x = raw_var.values.ravel()
@@ -169,7 +173,9 @@ def test_process_raprompro_reference_visual_comparison(
         if v0 not in raw_dataset or v1 not in raprompro_reference_dataset:
             continue
 
-        raw_var, reference_var = _align_2d(raw_dataset[v0], raprompro_reference_dataset[v1])
+        raw_var, reference_var = _align_2d(
+            raw_dataset[v0], raprompro_reference_dataset[v1]
+        )
         x = raw_var.values.ravel()
         y = reference_var.values.ravel()
 

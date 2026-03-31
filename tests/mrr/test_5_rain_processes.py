@@ -35,11 +35,19 @@ def test_compute_layer_trend_ols(raprompro_subset_10min_loaded_mrr):
     assert "F_Nw" in result
     assert result["b_Dm"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
     assert result["a_Dm"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
-    assert result["r2_Dm"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
+    assert result["r2_Dm"].shape == (
+        raprompro_subset_10min_loaded_mrr.ds.sizes["time"],
+    )
     assert result["F_Dm"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
-    assert result["b_LWC"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
-    assert result["a_LWC"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
-    assert result["r2_LWC"].shape == (raprompro_subset_10min_loaded_mrr.ds.sizes["time"],)
+    assert result["b_LWC"].shape == (
+        raprompro_subset_10min_loaded_mrr.ds.sizes["time"],
+    )
+    assert result["a_LWC"].shape == (
+        raprompro_subset_10min_loaded_mrr.ds.sizes["time"],
+    )
+    assert result["r2_LWC"].shape == (
+        raprompro_subset_10min_loaded_mrr.ds.sizes["time"],
+    )
 
 
 def test_rain_process_analyze(raprompro_subset_10min_loaded_mrr):
