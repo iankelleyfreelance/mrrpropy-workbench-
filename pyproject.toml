@@ -48,6 +48,7 @@ Homepage = "https://github.com/jabravoaranda/mrrpropy"
 Source = "https://github.com/jabravoaranda/mrrpropy"
 Issues = "https://github.com/jabravoaranda/mrrpropy/issues"
 Changelog = "https://github.com/jabravoaranda/mrrpropy/blob/main/CHANGELOG.md"
+Documentation = "https://jabravoaranda.github.io/mrrpropy/"
 
 [project.scripts]
 mrrpropy = "mrrpropy.cli.main:app"

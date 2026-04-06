@@ -7,6 +7,8 @@ versioning for published package releases.
 
 ## [Unreleased]
 
+## [0.1.0]
+
 ### Added
 
 - Production readiness checklist in `PRODUCTION.md`.
