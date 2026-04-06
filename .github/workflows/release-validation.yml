@@ -1,0 +1,59 @@
+name: Release Validation
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Verify import
+        run: uv run python -c "import mrrpropy"
+
+      - name: Run mypy typed lane
+        run: uv run mypy
+
+      - name: Run fast pytest lane
+        run: uv run pytest -m "not slow" -q
+
+      - name: Run release reprocessing validation
+        env:
+          MRRPRO_FORCE_REPROCESS: "1"
+          MRRPRO_TEST_GENERATED: ${{ runner.temp }}/generated
+          MRRPRO_TEST_FIGURES: ${{ runner.temp }}/figures
+        run: >
+          uv run pytest
+          tests/mrr/test_1_load_raw.py
+          tests/mrr/test_3_raprompro.py
+          tests/mrr/test_4_plots_raprompro.py
+          tests/mrr/test_5_rain_processes.py
+          tests/mrr/test_6_plot_rain_classification.py
+          tests/mrr/test_8_plot_rain_classification_in_hexagram.py
+          -q
+
+      - name: Upload generated artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-generated
+          path: |
+            ${{ runner.temp }}/generated
+            ${{ runner.temp }}/figures
+          if-no-files-found: warn

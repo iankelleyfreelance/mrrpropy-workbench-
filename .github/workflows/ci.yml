@@ -25,6 +25,9 @@ jobs:
       - name: Verify import
         run: uv run python -c "import mrrpropy"
 
+      - name: Run mypy typed lane
+        run: uv run mypy
+
       - name: Check formatting
         run: uv run black --check mrrpropy/cli tests
 
