@@ -45,6 +45,27 @@ def test_plot_spectrum_saves_png(raw_subset_10min_mrr, artifact_dir):
     plt.close(fig)
 
 
+def test_plot_spectra_by_range_saves_png(raw_subset_10min_mrr, artifact_dir):
+    ds = raw_subset_10min_mrr.ds
+    target_time = datetime.datetime(2025, 3, 8, 12, 50, 0)
+    ranges = ds["range"].values[[5, ds.sizes["range"] // 2, -5]].astype(float)
+
+    fig, filepath = raw_subset_10min_mrr.plot_spectra_by_range(
+        target_time,
+        ranges,
+        savefig=True,
+        output_dir=artifact_dir,
+        dpi=120,
+    )
+
+    assert isinstance(fig, Figure)
+    assert filepath is not None
+    assert filepath.exists()
+    assert filepath.suffix.lower() == ".png"
+    assert filepath.stat().st_size > 0
+    plt.close(fig)
+
+
 def test_plot_spectrogram_saves_png(raw_subset_10min_mrr, artifact_dir):
     target_time = datetime.datetime(2025, 3, 8, 12, 50, 0)
 
