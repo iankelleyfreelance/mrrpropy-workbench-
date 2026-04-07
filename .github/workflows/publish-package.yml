@@ -1,0 +1,103 @@
+name: Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Target package index"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+  release:
+    types:
+      - published
+
+jobs:
+  build-distributions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Verify import
+        run: uv run python -c "import mrrpropy"
+
+      - name: Ensure release tag matches package version
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          PACKAGE_VERSION="$(uv run python -c "from mrrpropy import __version__; print(__version__)")"
+          RELEASE_TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PACKAGE_VERSION" != "$RELEASE_TAG" ]; then
+            echo "Package version $PACKAGE_VERSION does not match release tag ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Validate distribution metadata
+        run: uvx twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    needs:
+      - build-distributions
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/mrrpropy/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: github.event_name == 'release'
+    needs:
+      - build-distributions
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mrrpropy/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

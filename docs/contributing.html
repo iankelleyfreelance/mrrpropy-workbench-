@@ -55,8 +55,10 @@ python -m http.server 8000 --directory site</code></pre>
 
     <h2>Typing scope</h2>
     <p>
-      Typing currently focuses on the public API, CLI, workflow scripts and test
-      fixtures. The long scientific kernels are typed more conservatively to avoid
+      Typing currently focuses on the extracted public-package surface used for
+      release safety: the <code>analysis</code>, <code>processing</code>,
+      <code>plotting</code>, <code>hexagram</code> and <code>cli</code> modules.
+      The long retained scientific kernels are typed more conservatively to avoid
       accidental behavioural change during refactors.
     </p>
   </main>

@@ -1,11 +1,27 @@
 """Hexagram mapping and classification helpers for rain-process diagnostics."""
 
-from pathlib import Path
 import csv
+from pathlib import Path
+from typing import TypeAlias, TypedDict
 
-import numpy as np
-import xarray as xr
 import matplotlib.pyplot as plt
+import numpy as np
+from numpy.typing import NDArray
+import xarray as xr
+
+FloatArray: TypeAlias = NDArray[np.float64]
+Float32Array: TypeAlias = NDArray[np.float32]
+IntArray: TypeAlias = NDArray[np.int_]
+BoolArray: TypeAlias = NDArray[np.bool_]
+ProcessSignature: TypeAlias = tuple[int, int, int]
+
+
+class HexagramAssets(TypedDict):
+    k: int
+    img: FloatArray
+    rgb_cells: FloatArray
+    yx_cells: IntArray
+    area_cells: IntArray
 
 
 # ============================================================
@@ -14,7 +30,7 @@ import matplotlib.pyplot as plt
 #  0 = banda central
 # +1 = banda alta
 # ============================================================
-PROCESS_SIGNATURES = {
+PROCESS_SIGNATURES: dict[str, list[ProcessSignature]] = {
     "breakup":      [(-1, +1,  0)],   # Dm↓, Nw↑, LWC≈const
     "coalescence":  [(+1, -1,  0)],   # Dm↑, Nw↓, LWC≈const
     "evaporation":  [(-1, -1, -1), (-1, -1,  0), (-1, 0, -1)],   # Dm↓, Nw↓, LWC↓
@@ -22,7 +38,7 @@ PROCESS_SIGNATURES = {
     "activation":   [(+1, +1, +1), (0,+1,+1)],   # Dm↑, Nw↑, LWC↑
 }
 
-PROCESS_CODES = {
+PROCESS_CODES: dict[str, str] = {
     'unknown': 'UNKNOWN',
     'steady_or_weak': 'STEADY',
     'breakup': 'BREAKUP',
@@ -32,7 +48,7 @@ PROCESS_CODES = {
     'activation': 'ACTIV.'
 }
 
-PROCESS_MARKERS = {
+PROCESS_MARKERS: dict[str, str] = {
     "breakup": "o",          # círculo
     "coalescence": "s",      # cuadrado
     "evaporation": "v",      # triángulo abajo
@@ -104,7 +120,14 @@ def build_rgb_from_trends(
     return out
 
 
-def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file="gw_hex_test_d.csv", b_file="bw_hex_test_d.csv", n_file="nw_hex_test_d.csv"):
+def generate_rgb_hex(
+    k: int,
+    save: bool = False,
+    r_file: str | Path = "rw_hex_test_d.csv",
+    g_file: str | Path = "gw_hex_test_d.csv",
+    b_file: str | Path = "bw_hex_test_d.csv",
+    n_file: str | Path = "nw_hex_test_d.csv",
+) -> tuple[Float32Array, Float32Array, Float32Array, Float32Array]:
     m = k * 2 + 1
     Q = m * 2 + 1
     N = 4 * m + 4  # Q + 2*(m+1)
@@ -150,7 +173,7 @@ def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file=
     for t in range(1, 2 * m + 2):
         for i in range(1, 7):
             for j in range(1, t + 1):
-                def set_cell(y, x, value):
+                def set_cell(y: int, x: int, value: float) -> None:
                     nonlocal p
                     rgb_grid[y, x] = p
                     p += 1
@@ -289,7 +312,7 @@ def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file=
                 #    print("RGB loop:", t)
                 
                 # 座標変換（Fortran → Python）
-                def set_val(ix, iy, val):
+                def set_val(ix: int, iy: int, val: float) -> None:
                     rgb_grid[iy, ix] = p
                     g_hex[iy, ix] = val
 
@@ -431,7 +454,6 @@ def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file=
     for t in range(1, 2 * m + 2):
         for i in range(1, 7):
             for j in range(1, t + 1):
-                x, y = None, None
                 if i == 1:
                     x, y = c - (j - 1), c + t
                 elif i == 2:
@@ -665,7 +687,7 @@ def generate_rgb_hex(k: float, save = False, r_file="rw_hex_test_d.csv", g_file=
     return r_hex, g_hex, b_hex, num_hex
 
 
-def get_hexagram_assets(k: int, valid_threshold: float = -0.5):
+def get_hexagram_assets(k: int, valid_threshold: float = -0.5) -> HexagramAssets:
     r_hex, g_hex, b_hex, num_hex = generate_rgb_hex(k=k)
 
     r = np.asarray(r_hex, float)
@@ -700,7 +722,12 @@ def get_hexagram_assets(k: int, valid_threshold: float = -0.5):
     }
 
 
-def map_rgb_to_hexagram(rgb: xr.Dataset, *, hex_assets, time_dim="time"):
+def map_rgb_to_hexagram(
+    rgb: xr.Dataset,
+    *,
+    hex_assets: HexagramAssets,
+    time_dim: str = "time",
+) -> xr.Dataset:
     rgb_cells = hex_assets["rgb_cells"]
     yx_cells = hex_assets["yx_cells"]
     area_cells = hex_assets["area_cells"]
@@ -727,7 +754,7 @@ def map_rgb_to_hexagram(rgb: xr.Dataset, *, hex_assets, time_dim="time"):
     return out
 
 
-def _component_mask(values: np.ndarray, sign: int, tol_center: float) -> np.ndarray:
+def _component_mask(values: FloatArray, sign: int, tol_center: float) -> BoolArray:
     """
     Devuelve máscara booleana para una componente RGB según el signo:
       -1 -> baja     : value < 0.5 - tol_center
@@ -750,7 +777,7 @@ def get_process_hexagram_mask(
     k: int,
     tol_center: float = 0.05,
     valid_threshold: float = -0.5,
-):
+) -> tuple[BoolArray, HexagramAssets]:
     """
     Devuelve la máscara 2D del hexagrama correspondiente a un proceso.
 
@@ -803,7 +830,8 @@ def get_process_hexagram_mask(
     G = rgb_cells[:, 1]
     B = rgb_cells[:, 2]
 
-    sig_def = PROCESS_SIGNATURES[process]
+    signatures = PROCESS_SIGNATURES[process]
+    sig_def = signatures
 
     # Normalizar a lista de firmas [(sR,sG,sB), ...]
     if isinstance(sig_def, tuple) and len(sig_def) == 3:
@@ -816,7 +844,7 @@ def get_process_hexagram_mask(
                     f"Firma inválida para proceso {process!r}: {item!r}. "
                     "Cada firma debe ser una tupla/lista de 3 enteros."
                 )
-            signatures.append(tuple(int(v) for v in item))
+            signatures.append((int(item[0]), int(item[1]), int(item[2])))
     else:
         raise ValueError(
             f"PROCESS_SIGNATURES[{process!r}] no tiene un formato válido: {sig_def!r}"
