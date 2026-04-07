@@ -50,7 +50,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 .black-cache/
-workbench/
+workbench/data/
+workbench/output/
 cover/
 
 #Folder tests
