@@ -13,6 +13,32 @@ versioning for published package releases.
 
 ### Fixed
 
+## [0.1.1]
+
+### Added
+
+- Non-parametric rain-process trend diagnostics based on Kendall's tau and
+  Theil-Sen slope, with canonical `trend_*` outputs for downstream RGB and
+  classification.
+- Regression coverage for the new monotonic-trend utilities and for RaProMPro
+  metadata completeness.
+
+### Changed
+
+- Rain-process classification now uses canonical trend diagnostics instead of
+  OLS slopes by default, while keeping OLS as an explicit legacy/diagnostic path.
+- Test modules are now grouped by domain under `tests/raw_mrr`,
+  `tests/raprompro`, `tests/rain_processes`, and `tests/hexagram`.
+- The documentation site, production guide, and release-validation workflow now
+  reflect the non-parametric trend workflow and the reorganized test suite.
+
+### Fixed
+
+- RaProMPro outputs now populate `long_name` and `units` consistently across
+  generated data variables, including the saved reference product.
+- Release validation now uses `MRRPRO_GENERATED_PRODUCT_ROOT` for forced product
+  regeneration instead of the old generated-output path convention.
+
 ## [0.1.0]
 
 ### Added
