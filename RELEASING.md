@@ -26,12 +26,14 @@ Recommended GitHub environments:
 
 1. Update `mrrpropy/__init__.py` with the release version.
 2. Update `CHANGELOG.md`.
-3. Run the release validation checklist from `PRODUCTION.md`.
-4. Commit the release candidate.
-5. Create an annotated tag matching the package version, for example `v0.1.0`.
-6. Push the tag.
-7. Create a GitHub Release from that tag and publish it.
-8. The publish workflow will build the package, validate the distributions, and
+3. Review the user-facing documentation and rebuild the docs site if the release
+   changes workflows, examples, or public defaults.
+4. Run the release validation checklist from `PRODUCTION.md`.
+5. Commit the release candidate.
+6. Create an annotated tag matching the package version, for example `v0.1.1`.
+7. Push the tag.
+8. Create a GitHub Release from that tag and publish it.
+9. The publish workflow will build the package, validate the distributions, and
    upload them to PyPI using Trusted Publishing.
 
 ## TestPyPI dry run

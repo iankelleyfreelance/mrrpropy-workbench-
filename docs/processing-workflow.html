@@ -49,6 +49,11 @@
 fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
 
     <h2>Microphysics workflow</h2>
+    <p>
+      The default layer-trend workflow is non-parametric: Kendall's tau captures
+      the direction and monotonic consistency of the vertical change, while the
+      Theil-Sen slope captures its robust physical magnitude.
+    </p>
     <pre><code>from datetime import datetime
 
 analysis = mrr.rain_process_analyze(
@@ -56,13 +61,20 @@ analysis = mrr.rain_process_analyze(
     layer=(1000.0, 2000.0),
     k=11,
     ze_th=-5.0,
-    min_points_ols=10,
-    eps_q=0.01,
-    rgb_q=0.02,
-    vars_trend=("Dm", "Nw", "LWC"),
+    trend_method="kendall_theilsen",
+    tau_zero_tol=0.05,
+    min_points_trend=10,
 )
 
-classified = mrr.classify_rain_process(analysis=analysis)</code></pre>
+classified = mrr.classify_rain_process(
+    analysis=analysis,
+    min_tau_strength=0.10,
+)</code></pre>
+    <p>
+      The downstream RGB mapping and classification consume canonical
+      <code>trend_*</code> variables, so the method can still be swapped to
+      <code>trend_method="ols"</code> for legacy or diagnostic comparison.
+    </p>
 
     <h2>Scientific reference and provenance</h2>
     <p>

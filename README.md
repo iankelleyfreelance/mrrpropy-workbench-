@@ -34,6 +34,18 @@ developer workflow around it.
 - Keep scientific algorithm changes confined to the processing modules and treat
   workflow, packaging, tests, and CI as separate concerns.
 
+## Rain-process trends
+
+The microphysical rain-process workflow now defaults to a non-parametric vertical
+trend characterization:
+
+- Kendall's tau describes the direction and consistency of monotonic change in a layer.
+- Theil-Sen slope describes the robust magnitude of that change.
+- Downstream RGB and classification consume canonical `trend_*` variables instead
+  of method-specific names, so the trend method can be swapped without changing
+  the rest of the pipeline.
+- OLS trend fitting remains available only as a legacy or diagnostic comparison path.
+
 ## Development
 
 Typical local commands:

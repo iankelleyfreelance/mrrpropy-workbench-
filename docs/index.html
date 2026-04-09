@@ -41,8 +41,8 @@
           <li>Load CF/Radial-style MRR-PRO NetCDF files into an <code>MRRProData</code> object.</li>
           <li>Run the RaProMPro processing workflow or load previously generated products.</li>
           <li>Plot reflectivity quicklooks, spectra, spectrograms, DSD views and profile diagnostics.</li>
-          <li>Analyse layer-scale rain-process signatures from <code>Dm</code>, <code>Nw</code> and <code>LWC</code>.</li>
-          <li>Classify process evolution on the RGB hexagram used by the package.</li>
+        <li>Analyse layer-scale rain-process signatures from <code>Dm</code>, <code>Nw</code> and <code>LWC</code>.</li>
+        <li>Classify process evolution on the RGB hexagram using non-parametric trend diagnostics by default.</li>
         </ul>
       </div>
       <figure class="figure-card">
@@ -82,7 +82,8 @@ fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</cod
         <h2>Processing workflow</h2>
         <p>
           The package keeps the scientific RaProMPro implementation available while
-          exposing a higher-level, xarray-based interface for processing and diagnostics.
+          exposing a higher-level, xarray-based interface for processing, diagnostics,
+          and robust microphysical trend analysis.
         </p>
         <p><a href="processing-workflow.html">Open workflow guide</a></p>
       </section>
