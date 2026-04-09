@@ -79,9 +79,10 @@ The test suite is organized into:
 - slow plotting regressions that write figures under `tests/figures/`,
 - generated NetCDF and other non-figure test outputs under `tests/generated/`.
 
-Bundled NetCDF files under `tests/data/` remain the reference fixtures. Generated
-outputs should go to ignored test output directories, not back into tracked fixture
-paths.
+Bundled NetCDF files under `tests/data/` should stay minimal. The repository keeps
+only the small RAW fixture required for exercising the workflow, while generated
+RaProMPro products should go to ignored output paths under `tests/data/PRODUCTS/`
+or other configured generated directories.
 
 ## Benchmarking
 
@@ -92,7 +93,8 @@ For quick performance checks of the canonical processing path, use the bundled
 uv run python scripts/benchmark_raprompro.py --quick --repeats 1
 ```
 
-For the full one-hour fixture, pass `--raw-path` explicitly or omit `--quick`.
+The benchmark is intentionally aimed at the small bundled RAW fixture so the repo
+does not need to carry large reproducible products.
 
 ## Documentation
 

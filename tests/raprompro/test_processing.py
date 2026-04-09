@@ -70,15 +70,6 @@ def generated_raprompro_dataset(generated_raprompro_path: Path) -> Iterator[xr.D
     ds.close()
 
 
-@pytest.fixture(scope="session")
-def raprompro_reference_dataset(
-    raprompro_reference_path: Path,
-) -> Iterator[xr.Dataset]:
-    ds = xr.open_dataset(raprompro_reference_path)
-    yield ds
-    ds.close()
-
-
 def test_processing_raprompro_smoke(generated_raprompro_path: Path) -> None:
     assert generated_raprompro_path.exists()
     assert generated_raprompro_path.suffix == ".nc"
@@ -104,7 +95,6 @@ def test_processing_raprompro_from_raw(generated_raprompro_path: Path) -> None:
 def test_process_raprompro_regression(
     raw_dataset: xr.Dataset,
     generated_raprompro_dataset: xr.Dataset,
-    raprompro_reference_dataset: xr.Dataset,
     artifact_dir: Path,
 ) -> None:
     rows: list[dict[str, float | int | str]] = []
@@ -114,21 +104,16 @@ def test_process_raprompro_regression(
             pytest.fail(
                 f"Missing regression variable pair {v0}->{v1} in generated output"
             )
-        if v1 not in raprompro_reference_dataset:
-            pytest.fail(f"Missing reference variable {v1} in raprompro reference file")
 
         raw_var, generated_var = _align_2d(
             raw_dataset[v0], generated_raprompro_dataset[v1]
         )
-        _, reference_var = _align_2d(raw_var, raprompro_reference_dataset[v1])
 
         x = raw_var.values.ravel()
         y = generated_var.values.ravel()
-        y_ref = reference_var.values.ravel()
 
         if v1 == "DBPIA":
             y = np.abs(y)
-            y_ref = np.abs(y_ref)
 
         stats = _stats(x, y)
         if stats is None:
@@ -137,10 +122,6 @@ def test_process_raprompro_regression(
         stats.update({"var_before": v0, "var_after": v1, "units": units})
         rows.append(stats)
 
-        overlap = np.isfinite(y) & np.isfinite(y_ref)
-        assert overlap.sum() > 10, f"No overlap against reference for {v1}"
-        corr_vs_ref = float(np.corrcoef(y[overlap], y_ref[overlap])[0, 1])
-        assert corr_vs_ref > 0.6, f"Low agreement vs reference for {v1}: {corr_vs_ref}"
         assert stats["corr"] > 0.6, f"Low correlation for {v0}: {stats['corr']}"
 
     with open(artifact_dir / "metrics.csv", "w", newline="", encoding="utf-8") as f:
@@ -188,20 +169,20 @@ def test_process_raprompro_generated_metadata(
 
 
 @pytest.mark.plot
-def test_process_raprompro_reference_visual_comparison(
+def test_process_raprompro_generated_visual_comparison(
     raw_dataset: xr.Dataset,
-    raprompro_reference_dataset: xr.Dataset,
+    generated_raprompro_dataset: xr.Dataset,
     artifact_dir: Path,
 ) -> None:
     for v0, v1, units in KEY_REGRESSION_PAIRS:
-        if v0 not in raw_dataset or v1 not in raprompro_reference_dataset:
+        if v0 not in raw_dataset or v1 not in generated_raprompro_dataset:
             continue
 
-        raw_var, reference_var = _align_2d(
-            raw_dataset[v0], raprompro_reference_dataset[v1]
+        raw_var, generated_var = _align_2d(
+            raw_dataset[v0], generated_raprompro_dataset[v1]
         )
         x = raw_var.values.ravel()
-        y = reference_var.values.ravel()
+        y = generated_var.values.ravel()
 
         idx = np.where(np.isfinite(x) & np.isfinite(y))[0]
         if idx.size < 10:
@@ -221,15 +202,15 @@ def test_process_raprompro_reference_visual_comparison(
         hi = np.nanpercentile(np.concatenate([xx, yy]), 99)
         plt.plot([lo, hi], [lo, hi])
         plt.xlabel(f"{v0} (raw) [{units}]")
-        plt.ylabel(f"{v1} (reference) [{units}]")
+        plt.ylabel(f"{v1} (generated) [{units}]")
         plt.title(
-            f"reference {v0} vs {v1} | n={stats['n']} bias={stats['bias']:.3g} rmse={stats['rmse']:.3g} r={stats['corr']:.3f}",
+            f"generated {v0} vs {v1} | n={stats['n']} bias={stats['bias']:.3g} rmse={stats['rmse']:.3g} r={stats['corr']:.3f}",
             fontsize=12,
         )
         plt.xlim(lo, hi)
         plt.ylim(lo, hi)
         fig.savefig(
-            artifact_dir / f"reference_correlation_check_{v0}_vs_{v1}.png",
+            artifact_dir / f"generated_correlation_check_{v0}_vs_{v1}.png",
             dpi=200,
             bbox_inches="tight",
         )

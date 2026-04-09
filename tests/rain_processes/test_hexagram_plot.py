@@ -18,7 +18,7 @@ def analysis(raprompro_subset_10min_loaded_mrr):
         layer=(1000.0, 2000.0),
         k=11,
         ze_th=-5.0,
-        min_points_ols=10,
+        min_points_trend=10,
         eps_q=0.01,
         rgb_q=0.02,
         vars_trend=("Dm", "Nw", "LWC"),

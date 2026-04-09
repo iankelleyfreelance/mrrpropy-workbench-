@@ -10,15 +10,8 @@ import pytest
 from mrrpropy.raw_class import MRRProData
 
 
-RAW_DATA_PATH = Path(r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
-RAW_SUBSET_10MIN_PATH = Path(
-    r"./tests/data/RAW_SUBSETS/mrrpro81/2025/03/08/20250308_120000_10min.nc"
-)
-RAPROMPRO_REFERENCE_PATH = Path(
-    r"./tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_raprompro.nc"
-)
-RAPROMPRO_REFERENCE_SUBSET_10MIN_PATH = Path(
-    r"./tests/data/PRODUCT_SUBSETS/mrrpro81/2025/03/08/20250308_120000_raprompro_10min.nc"
+RAW_FIXTURE_PATH = Path(
+    r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc"
 )
 PRODUCTS_ROOT = Path(r"./tests/data/PRODUCTS")
 
@@ -59,37 +52,15 @@ def _env_truthy(name: str) -> bool:
 
 @pytest.fixture(scope="session")
 def raw_dataset_path() -> Path:
-    raw_path = Path(os.getenv("MRRPRO_RAW_DATA_PATH", str(RAW_DATA_PATH)))
+    raw_path = Path(os.getenv("MRRPRO_RAW_DATA_PATH", str(RAW_FIXTURE_PATH)))
     if not raw_path.exists():
         pytest.skip(f"Missing raw fixture file: {raw_path}")
     return raw_path
 
 
 @pytest.fixture(scope="session")
-def raw_subset_10min_path() -> Path:
-    if not RAW_SUBSET_10MIN_PATH.exists():
-        pytest.skip(f"Missing raw subset fixture file: {RAW_SUBSET_10MIN_PATH}")
-    return RAW_SUBSET_10MIN_PATH
-
-
-@pytest.fixture(scope="session")
-def raprompro_reference_path() -> Path:
-    product_path = Path(
-        os.getenv("MRRPRO_REFERENCE_DATA_PATH", str(RAPROMPRO_REFERENCE_PATH))
-    )
-    if not product_path.exists():
-        pytest.skip(f"Missing RaProMPro fixture file: {product_path}")
-    return product_path
-
-
-@pytest.fixture(scope="session")
-def raprompro_reference_subset_10min_path() -> Path:
-    if not RAPROMPRO_REFERENCE_SUBSET_10MIN_PATH.exists():
-        pytest.skip(
-            "Missing RaProMPro subset fixture file: "
-            f"{RAPROMPRO_REFERENCE_SUBSET_10MIN_PATH}"
-        )
-    return RAPROMPRO_REFERENCE_SUBSET_10MIN_PATH
+def raw_subset_10min_path(raw_dataset_path: Path) -> Path:
+    return raw_dataset_path
 
 
 @pytest.fixture(scope="session")
@@ -130,30 +101,24 @@ def raw_mrr(raw_dataset_path: Path) -> Iterator[MRRProData]:
 @pytest.fixture(scope="session")
 def raprompro_loaded_mrr(
     raw_dataset_path: Path,
-    raprompro_reference_path: Path,
+    generated_raprompro_path: Path,
 ) -> Iterator[MRRProData]:
     mrr = MRRProData.from_file(raw_dataset_path)
-    mrr.load_raprompro(raprompro_reference_path)
+    mrr.load_raprompro(generated_raprompro_path)
     yield mrr
     mrr.close()
 
 
 @pytest.fixture(scope="session")
-def raw_subset_10min_mrr(raw_subset_10min_path: Path) -> Iterator[MRRProData]:
-    mrr = MRRProData.from_file(raw_subset_10min_path)
-    yield mrr
-    mrr.close()
+def raw_subset_10min_mrr(raw_mrr: MRRProData) -> MRRProData:
+    return raw_mrr
 
 
 @pytest.fixture(scope="session")
 def raprompro_subset_10min_loaded_mrr(
-    raw_subset_10min_path: Path,
-    raprompro_reference_subset_10min_path: Path,
-) -> Iterator[MRRProData]:
-    mrr = MRRProData.from_file(raw_subset_10min_path)
-    mrr.load_raprompro(raprompro_reference_subset_10min_path)
-    yield mrr
-    mrr.close()
+    raprompro_loaded_mrr: MRRProData,
+) -> MRRProData:
+    return raprompro_loaded_mrr
 
 
 @pytest.fixture(scope="session")

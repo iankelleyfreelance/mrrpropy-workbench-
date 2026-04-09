@@ -8,10 +8,10 @@ from pathlib import Path
 from mrrpropy.raw_class import MRRProData
 
 
-DEFAULT_RAW_PATH = Path(r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
-QUICK_RAW_PATH = Path(
-    r"./tests/data/RAW_SUBSETS/mrrpro81/2025/03/08/20250308_120000_10min.nc"
+DEFAULT_RAW_PATH = Path(
+    r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc"
 )
+QUICK_RAW_PATH = DEFAULT_RAW_PATH
 
 
 def _run_once(
@@ -62,7 +62,7 @@ def main() -> None:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Use the bundled 10-minute RAW subset for fast benchmarking.",
+        help="Use the bundled 10-minute RAW fixture for fast benchmarking.",
     )
     parser.add_argument(
         "--repeats",

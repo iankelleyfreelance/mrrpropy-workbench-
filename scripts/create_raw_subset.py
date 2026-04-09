@@ -6,20 +6,21 @@ from pathlib import Path
 import xarray as xr
 
 
-DEFAULT_INPUT_PATH = Path(r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
 DEFAULT_OUTPUT_PATH = Path(
-    r"./tests/data/RAW_SUBSETS/mrrpro81/2025/03/08/20250308_120000_10min.nc"
+    r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc"
 )
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Create a temporal subset from the RAW MRRPro NetCDF fixture."
+        description=(
+            "Create the bundled small RAW fixture from an external larger MRR-Pro NetCDF file."
+        )
     )
     parser.add_argument(
         "--input-path",
         type=Path,
-        default=DEFAULT_INPUT_PATH,
+        required=True,
         help="Path to the source RAW NetCDF file.",
     )
     parser.add_argument(

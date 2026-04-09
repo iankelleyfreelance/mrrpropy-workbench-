@@ -62,15 +62,15 @@
 
 from mrrpropy.raw_class import MRRProData
 
-raw_path = Path("tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
-processed_path = Path("tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_raprompro.nc")
+raw_path = Path("tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc")
+processed_path = Path("tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_10min_raprompro.nc")
 
 mrr = MRRProData.from_file(raw_path)
 
-# Fast path if a processed product already exists
+# Fast path if a generated processed product already exists locally
 mrr.load_raprompro(processed_path)
 
-# Alternatively, generate a processed dataset
+# Alternatively, generate a processed dataset into PRODUCTS/
 # mrr.process_raprompro(save=False)
 
 fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</code></pre>
