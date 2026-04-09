@@ -42,7 +42,11 @@ def _raw_to_generated_product_path(raw_path: Path, products_root: Path) -> Path:
         relative = Path(raw_resolved.name)
 
     product_relative = relative.with_suffix("")
-    return products_root / product_relative.parent / f"{product_relative.name}_raprompro.nc"
+    return (
+        products_root
+        / product_relative.parent
+        / f"{product_relative.name}_raprompro.nc"
+    )
 
 
 def _env_truthy(name: str) -> bool:

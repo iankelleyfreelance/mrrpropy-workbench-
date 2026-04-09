@@ -100,7 +100,9 @@ def test_rain_process_analyze_uses_nonparametric_pipeline(
     monkeypatch,
 ):
     def _raise_if_called(*args, **kwargs):
-        raise AssertionError("OLS helper should not be used by the default analysis pipeline.")
+        raise AssertionError(
+            "OLS helper should not be used by the default analysis pipeline."
+        )
 
     monkeypatch.setattr(process_analysis, "ols_slope_intercept_r2", _raise_if_called)
 
@@ -124,7 +126,18 @@ def test_rain_process_analyze_uses_nonparametric_pipeline(
         assert field_name in analysis
 
     for variable_name in ("Dm", "Nw", "LWC"):
-        for prefix in ("tau", "p", "ts", "sign", "strength", "trend_mag", "trend_sign", "trend_strength", "trend_score", "trend_p"):
+        for prefix in (
+            "tau",
+            "p",
+            "ts",
+            "sign",
+            "strength",
+            "trend_mag",
+            "trend_sign",
+            "trend_strength",
+            "trend_score",
+            "trend_p",
+        ):
             assert f"{prefix}_{variable_name}" in analysis
         assert f"b_{variable_name}" in analysis
 
