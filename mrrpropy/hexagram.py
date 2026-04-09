@@ -120,6 +120,58 @@ def build_rgb_from_trends(
     return out
 
 
+def build_rgb_from_tau(
+    ds: xr.Dataset,
+    *,
+    time_dim: str = "time",
+    vars: tuple[str, str, str] = ("tau_Dm", "tau_Nw", "tau_LWC"),
+) -> xr.Dataset:
+    """
+    Build RGB channels from bounded signed trend scores.
+
+    Each component is mapped naturally from ``[-1, 1]`` to ``[0, 1]`` so that
+    a score of ``0`` sits at the hexagram centre (``0.5``).
+    """
+
+    def _tau_to_unit(values: np.ndarray) -> np.ndarray:
+        out = np.full_like(values, np.nan, dtype=float)
+        finite = np.isfinite(values)
+        out[finite] = 0.5 * (np.clip(values[finite], -1.0, 1.0) + 1.0)
+        return out
+
+    out = xr.Dataset(coords={time_dim: ds[time_dim].values})
+    out["R"] = xr.DataArray(_tau_to_unit(ds[vars[0]].values.astype(float)), dims=(time_dim,))
+    out["G"] = xr.DataArray(_tau_to_unit(ds[vars[1]].values.astype(float)), dims=(time_dim,))
+    out["B"] = xr.DataArray(_tau_to_unit(ds[vars[2]].values.astype(float)), dims=(time_dim,))
+    out.attrs["method"] = "tau"
+    out.attrs["source_vars"] = ",".join(vars)
+    out.attrs["mapping"] = "natural: tau in [-1,1] -> RGB in [0,1]"
+    return out
+
+
+def build_rgb_from_unit_scores(
+    ds: xr.Dataset,
+    *,
+    time_dim: str = "time",
+    vars: tuple[str, str, str] = (
+        "trend_score_Dm",
+        "trend_score_Nw",
+        "trend_score_LWC",
+    ),
+) -> xr.Dataset:
+    """
+    Build RGB channels from method-neutral signed trend scores in ``[-1, 1]``.
+
+    This is the preferred helper when the analysis pipeline exposes canonical
+    ``trend_score_*`` variables independently of the underlying trend method.
+    """
+    out = build_rgb_from_tau(ds, time_dim=time_dim, vars=vars)
+    out.attrs["method"] = "unit_score"
+    out.attrs["source_vars"] = ",".join(vars)
+    out.attrs["mapping"] = "natural: trend_score in [-1,1] -> RGB in [0,1]"
+    return out
+
+
 def generate_rgb_hex(
     k: int,
     save: bool = False,

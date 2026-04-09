@@ -38,33 +38,36 @@
     <pre><code>import datetime
 
 fig, path = mrr.plot_spectrum(
-    datetime.datetime(2025, 3, 8, 12, 50, 0),
+    datetime.datetime(2025, 3, 8, 12, 5, 0),
     target_range=2880.0,
     spectrum_var="spectrum_raw",
 )
 
 fig, path = mrr.plot_spectrogram(
-    datetime.datetime(2025, 3, 8, 12, 50, 0),
+    datetime.datetime(2025, 3, 8, 12, 5, 0),
     spectrum_var="spectrum_raw",
 )</code></pre>
 
     <h2>Microphysical process analysis</h2>
     <p>
       Layer-scale trends in <code>Dm</code>, <code>Nw</code> and <code>LWC</code>
-      can be projected to RGB and classified on the package hexagram.
+      are analysed non-parametrically by default and then projected to RGB for
+      hexagram-based classification.
     </p>
     <pre><code>analysis = mrr.rain_process_analyze(
     period=(datetime.datetime(2025, 3, 8, 12, 0, 0), datetime.datetime(2025, 3, 8, 12, 10, 0)),
     layer=(1000.0, 2000.0),
     k=11,
     ze_th=-5.0,
-    min_points_ols=10,
-    eps_q=0.01,
-    rgb_q=0.02,
-    vars_trend=("Dm", "Nw", "LWC"),
+    trend_method="kendall_theilsen",
+    tau_zero_tol=0.05,
+    min_points_trend=10,
 )
 
-classified = mrr.classify_rain_process(analysis=analysis)
+classified = mrr.classify_rain_process(
+    analysis=analysis,
+    min_tau_strength=0.10,
+)
 
 fig, path = mrr.plot_classified_processes_on_hexagram(
     classified=classified,
@@ -76,6 +79,10 @@ fig, path = mrr.plot_classified_processes_on_hexagram(
       <img src="assets/hexagram_classification_example.png" alt="Hexagram classification example">
       <figcaption>Example of classified rain-process samples plotted on the RGB hexagram.</figcaption>
     </figure>
+    <p>
+      For method comparison or backwards checks, pass
+      <code>trend_method="ols"</code> to <code>rain_process_analyze()</code>.
+    </p>
   </main>
 </body>
 </html>

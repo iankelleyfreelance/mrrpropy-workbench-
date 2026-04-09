@@ -44,18 +44,20 @@ PowerShell:
 
 ```powershell
 $env:MRRPRO_FORCE_REPROCESS = "1"
-uv run pytest tests/mrr/test_1_load_raw.py tests/mrr/test_3_raprompro.py tests/mrr/test_4_plots_raprompro.py tests/mrr/test_5_rain_processes.py tests/mrr/test_6_plot_rain_classification.py tests/mrr/test_8_plot_rain_classification_in_hexagram.py -q
+$env:MRRPRO_GENERATED_PRODUCT_ROOT = "$PWD/tests/generated/products"
+uv run pytest tests/raw_mrr tests/raprompro tests/rain_processes tests/hexagram -q
 ```
 
 Bash:
 
 ```bash
-MRRPRO_FORCE_REPROCESS=1 uv run pytest tests/mrr/test_1_load_raw.py tests/mrr/test_3_raprompro.py tests/mrr/test_4_plots_raprompro.py tests/mrr/test_5_rain_processes.py tests/mrr/test_6_plot_rain_classification.py tests/mrr/test_8_plot_rain_classification_in_hexagram.py -q
+MRRPRO_FORCE_REPROCESS=1 MRRPRO_GENERATED_PRODUCT_ROOT=./tests/generated/products uv run pytest tests/raw_mrr tests/raprompro tests/rain_processes tests/hexagram -q
 ```
 
 4. Review the generated outputs.
 
-- Confirm that the generated NetCDF product is created under `tests/generated/`.
+- Confirm that the generated NetCDF product is created under the configured
+  `MRRPRO_GENERATED_PRODUCT_ROOT` (for example `tests/generated/products/`).
 - Review regression metrics and any diagnostic figures when the release touches
   the processing path.
 - Compare output naming and destination paths with the production job

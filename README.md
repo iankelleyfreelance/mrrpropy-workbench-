@@ -34,6 +34,18 @@ developer workflow around it.
 - Keep scientific algorithm changes confined to the processing modules and treat
   workflow, packaging, tests, and CI as separate concerns.
 
+## Rain-process trends
+
+The microphysical rain-process workflow now defaults to a non-parametric vertical
+trend characterization:
+
+- Kendall's tau describes the direction and consistency of monotonic change in a layer.
+- Theil-Sen slope describes the robust magnitude of that change.
+- Downstream RGB and classification consume canonical `trend_*` variables instead
+  of method-specific names, so the trend method can be swapped without changing
+  the rest of the pipeline.
+- OLS trend fitting remains available only as a legacy or diagnostic comparison path.
+
 ## Development
 
 Typical local commands:
@@ -67,9 +79,10 @@ The test suite is organized into:
 - slow plotting regressions that write figures under `tests/figures/`,
 - generated NetCDF and other non-figure test outputs under `tests/generated/`.
 
-Bundled NetCDF files under `tests/data/` remain the reference fixtures. Generated
-outputs should go to ignored test output directories, not back into tracked fixture
-paths.
+Bundled NetCDF files under `tests/data/` should stay minimal. The repository keeps
+only the small RAW fixture required for exercising the workflow, while generated
+RaProMPro products should go to ignored output paths under `tests/data/PRODUCTS/`
+or other configured generated directories.
 
 ## Benchmarking
 
@@ -80,7 +93,8 @@ For quick performance checks of the canonical processing path, use the bundled
 uv run python scripts/benchmark_raprompro.py --quick --repeats 1
 ```
 
-For the full one-hour fixture, pass `--raw-path` explicitly or omit `--quick`.
+The benchmark is intentionally aimed at the small bundled RAW fixture so the repo
+does not need to carry large reproducible products.
 
 ## Documentation
 

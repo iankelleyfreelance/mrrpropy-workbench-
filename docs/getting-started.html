@@ -32,8 +32,8 @@ uv run python -c "import mrrpropy"</code></pre>
 
 from mrrpropy.raw_class import MRRProData
 
-raw_path = Path("tests/data/RAW/mrrpro81/2025/03/08/20250308_120000.nc")
-processed_path = Path("tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_raprompro.nc")
+raw_path = Path("tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc")
+processed_path = Path("tests/data/PRODUCTS/mrrpro81/2025/03/08/20250308_120000_10min_raprompro.nc")
 
 mrr = MRRProData.from_file(raw_path)
 
@@ -49,7 +49,7 @@ fig, ax = mrr.quicklook(variable="Ze", source="raprompro", vmin=0, vmax=40)</cod
     <pre><code>import datetime
 
 fig, path = mrr.plot_spectrum(
-    datetime.datetime(2025, 3, 8, 12, 50, 0),
+    datetime.datetime(2025, 3, 8, 12, 5, 0),
     target_range=2880.0,
     spectrum_var="spectrum_raw",
     savefig=False,
@@ -57,8 +57,9 @@ fig, path = mrr.plot_spectrum(
 
     <h2>When to process and when to load</h2>
     <ul>
-      <li>Use <code>load_raprompro()</code> when a processed NetCDF already exists and you want fast access to diagnostics.</li>
+      <li>Use <code>load_raprompro()</code> when a generated processed NetCDF already exists locally and you want fast access to diagnostics.</li>
       <li>Use <code>process_raprompro()</code> when you need to generate the processed product from raw spectra.</li>
+      <li>Use <code>rain_process_analyze()</code> when you want layer-based microphysical process diagnostics; the default trend method is <code>kendall_theilsen</code>.</li>
     </ul>
   </main>
 </body>
