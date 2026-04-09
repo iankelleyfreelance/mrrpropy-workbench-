@@ -524,18 +524,25 @@ def process_raprompro(
     out = xr.Dataset(coords=coords)
 
     # 2D fields (time,range) with original names
+    def _attrs(units: str, desc: str) -> dict[str, str]:
+        return {
+            "units": units,
+            "long_name": desc,
+            "description": desc,
+        }
+
     def _da2(name, data, units, desc):
         out[name] = xr.DataArray(
             np.asarray(data, dtype=float),
             dims=("time", "range"),
-            attrs={"units": units, "description": desc},
+            attrs=_attrs(units, desc),
         )
 
     _da2(
         "Type",
         estat_full,
-        "",
-        "Predominant hydrometeor type numerical value (original CLI)",
+        "1",
+        "Predominant hydrometeor type classification code (original CLI)",
     )
     _da2("W", w_full, "m s-1", "Fall speed with aliasing correction")
     _da2(
@@ -547,13 +554,13 @@ def process_raprompro(
     _da2(
         "Skewness",
         sk_full,
-        "none",
+        "1",
         "Skewness of the spectral reflectivity with dealiasing",
     )
     _da2(
         "Kurtosis",
         kur_full,
-        "none",
+        "1",
         "Kurtosis of the spectral reflectivity with dealiasing",
     )
     _da2(
@@ -610,7 +617,7 @@ def process_raprompro(
         "Normalized intercept parameter (all liquid)",
     )
     _da2("Dm_all", DM_all_full, "mm", "Mean mass-weighted diameter (all liquid)")
-    _da2("Noise", Noi_full, "", "Noise estimate in eta(n) units (original)")
+    _da2("Noise", Noi_full, "eta_n", "Noise estimate in eta(n) units (original)")
     _da2("SNR", SNR_full, "dB", "SNR used/derived by algorithm (original)")
     _da2(
         "N_da",
@@ -623,26 +630,26 @@ def process_raprompro(
     out["BB_bottom"] = xr.DataArray(
         np.asarray(bb_bot_full2, dtype=float)[:, None],
         dims=("time", "BB_Height"),
-        attrs={
-            "units": "m",
-            "description": "range from BB bottom above sea level (original CLI)",
-        },
+        attrs=_attrs(
+            "m",
+            "Range from bright-band bottom above sea level (original CLI)",
+        ),
     )
     out["BB_top"] = xr.DataArray(
         np.asarray(bb_top_full2, dtype=float)[:, None],
         dims=("time", "BB_Height"),
-        attrs={
-            "units": "m",
-            "description": "range from BB top above sea level (original CLI)",
-        },
+        attrs=_attrs(
+            "m",
+            "Range from bright-band top above sea level (original CLI)",
+        ),
     )
     out["BB_peak"] = xr.DataArray(
         np.asarray(bb_peak_full2, dtype=float)[:, None],
         dims=("time", "BB_Height"),
-        attrs={
-            "units": "m",
-            "description": "range from BB peak above sea level (original CLI)",
-        },
+        attrs=_attrs(
+            "m",
+            "Range from bright-band peak above sea level (original CLI)",
+        ),
     )
 
     # Optional 3D products (names follow original netCDF)
@@ -655,10 +662,7 @@ def process_raprompro(
                 "range": coords["range"],
                 "speed": np.arange(-Nbins * fNy, 2 * Nbins * fNy, fNy),
             },
-            attrs={
-                "units": "mm-1",
-                "description": "spectral reflectivity dealiased (original CLI)",
-            },
+            attrs=_attrs("mm-1", "Dealiased spectral reflectivity (original CLI)"),
         )
 
     if save_dsd_3d:
@@ -670,10 +674,7 @@ def process_raprompro(
                 "range": coords["range"],
                 "DropSize": np.asarray(D[0], dtype=float),
             },
-            attrs={
-                "units": "log10(m-3 mm-1)",
-                "description": "3D DSD (original CLI)",
-            },
+            attrs=_attrs("log10(m-3 mm-1)", "Three-dimensional DSD (original CLI)"),
         )
 
     subject.raprompro = out

@@ -53,7 +53,12 @@ class MicrophysicsConfig:
 
     variable_threshold: str = "Ze"
     threshold_value: float = -5.0
+    trend_method: str = "kendall_theilsen"
+    tau_zero_tol: float = 0.05
+    min_points_trend: int = 10
     min_points_ols: int = 10
+    min_tau_strength: float = 0.10
+    max_tau_pvalue: float | None = None
     eps_q: float = 0.01
     rgb_q: float = 0.02
     eps_mode: str = "global_quantile"
@@ -908,15 +913,16 @@ class MRRProData:
         min_points_ols: int = 10,
     ) -> xr.Dataset:
         """
-        Compute layer-wise OLS trends of selected microphysical variables.
+        Compute layer-wise legacy OLS trends of selected microphysical variables.
 
         For each time step, the method fits ``ln(X)`` versus depth from the top
         of the selected layer, after thresholding on a reflectivity field such as
         ``Ze``. It returns slopes, intercepts, fit quality and the masks actually
         used in each regression.
 
-        The output is designed to be traceable and reusable by
-        :meth:`rain_process_analyze`.
+        The output is kept for backward compatibility and diagnostic comparison.
+        The recommended microphysical method is :meth:`compute_layer_trend`,
+        which uses Kendall's tau plus Theil-Sen slope.
         """
         return process_analysis.compute_layer_trend_ols(
             self,
@@ -932,6 +938,50 @@ class MRRProData:
             min_points_ols=min_points_ols,
         )
 
+    def compute_layer_trend(
+        self,
+        *,
+        z_top: float,
+        z_base: float,
+        time_dim: str = "time",
+        variable_threshold: str = "Ze",
+        threshold_value: float = -5.0,
+        vars: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
+        trend_method: str = "kendall_theilsen",
+        tau_zero_tol: float = 0.05,
+        min_points_trend: int | None = None,
+        min_points_ols: int | None = None,
+        eps_mode: str = "hourly_quantile",
+        q: float = 0.01,
+        eps_floor_mode: str = "global_min",
+    ) -> xr.Dataset:
+        """
+        Compute layer-wise microphysical trends.
+
+        The returned dataset always exposes canonical downstream fields such as
+        ``trend_mag_*``, ``trend_sign_*``, ``trend_strength_*``,
+        ``trend_score_*`` and ``trend_p_*``. By default, the underlying trend
+        summary is non-parametric: Kendall's tau captures monotonic direction
+        and consistency, while Theil-Sen slope captures robust magnitude.
+        ``trend_method="ols"`` keeps the legacy fit available for comparison.
+        """
+        return process_analysis.compute_layer_trend(
+            self,
+            z_top=z_top,
+            z_base=z_base,
+            time_dim=time_dim,
+            variable_threshold=variable_threshold,
+            threshold_value=threshold_value,
+            vars=vars,
+            trend_method=trend_method,
+            tau_zero_tol=tau_zero_tol,
+            min_points_trend=min_points_trend,
+            min_points_ols=min_points_ols,
+            eps_mode=eps_mode,
+            q=q,
+            eps_floor_mode=eps_floor_mode,
+        )
+
     def rain_process_analyze(
         self,
         *,
@@ -939,7 +989,10 @@ class MRRProData:
         layer: tuple[float, float],
         k: int,
         ze_th: float = -5.0,
-        min_points_ols: int = 10,
+        trend_method: str = "kendall_theilsen",
+        tau_zero_tol: float = 0.05,
+        min_points_trend: int | None = None,
+        min_points_ols: int | None = None,
         eps_q: float = 0.01,
         rgb_q: float = 0.02,
         vars_trend: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
@@ -949,9 +1002,13 @@ class MRRProData:
 
         The workflow is:
 
-        1. compute OLS trends for ``vars_trend``,
-        2. map those trends into RGB space,
+        1. compute trend diagnostics for ``vars_trend``,
+        2. map those diagnostics into RGB space,
         3. project the RGB samples onto the package hexagram grid.
+
+        The pipeline consumes method-neutral canonical trend variables, so the
+        downstream RGB and classification steps do not depend on whether the
+        diagnostics came from Kendall/Theil-Sen or from the legacy OLS method.
 
         Returns
         -------
@@ -966,6 +1023,9 @@ class MRRProData:
             layer=layer,
             k=k,
             ze_th=ze_th,
+            trend_method=trend_method,
+            tau_zero_tol=tau_zero_tol,
+            min_points_trend=min_points_trend,
             min_points_ols=min_points_ols,
             eps_q=eps_q,
             rgb_q=rgb_q,
@@ -1016,15 +1076,19 @@ class MRRProData:
         analysis: xr.Dataset,
         tol_center: float = 0.05,
         min_strength: float = 0.10,
+        min_tau_strength: float | None = None,
+        max_p_value: float | None = None,
+        max_tau_pvalue: float | None = None,
     ) -> xr.Dataset:
         """
         Classify each time sample into a rain-process category.
 
         The method expects the RGB mapping created by
         :meth:`rain_process_analyze`, with the convention ``R -> Dm``,
-        ``G -> Nw`` and ``B -> LWC``. Classification is based on the sign of each
-        RGB component relative to the hexagram centre and the process signatures
-        defined in :mod:`mrrpropy.hexagram`.
+        ``G -> Nw`` and ``B -> LWC``. When canonical trend diagnostics are
+        present, classification uses ``trend_sign_*`` and ``trend_strength_*``
+        independently of the underlying trend method. RGB-centre classification
+        is retained as a compatibility fallback for legacy analyses.
         """
 
         return process_analysis.classify_rain_process(
@@ -1032,6 +1096,9 @@ class MRRProData:
             analysis=analysis,
             tol_center=tol_center,
             min_strength=min_strength,
+            min_tau_strength=min_tau_strength,
+            max_p_value=max_p_value,
+            max_tau_pvalue=max_tau_pvalue,
         )
 
     def plot_processes_evolution(
