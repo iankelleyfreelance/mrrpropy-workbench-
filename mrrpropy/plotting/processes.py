@@ -49,6 +49,10 @@ def plot_rain_process_in_layer_2d(
 
     pcfg = subject.plot_cfg
     figsize = kwargs.get("figsize", pcfg.figsize)
+    markersize = kwargs.get("marker_size", kwargs.get("markersize", 50))
+    alpha = kwargs.get("alpha", 0.9)
+    edgecolors = kwargs.get("edgecolors", "black")
+    linewidths = kwargs.get("linewidths", 0.35)
 
     for var in (x, y, z):
         if var not in ds:
@@ -84,9 +88,12 @@ def plot_rain_process_in_layer_2d(
         y=y,
         hue=z,
         cmap=kwargs.get("cmap", "viridis"),
-        s=kwargs.get("marker_size", kwargs.get("markersize", 50)),
+        s=markersize,
         vmin=-z_abs_max,
         vmax=z_abs_max,
+        alpha=alpha,
+        edgecolors=edgecolors,
+        linewidths=linewidths,
         ax=ax,
     )
     ax.set_xlabel(x)

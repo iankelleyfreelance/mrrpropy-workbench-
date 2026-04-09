@@ -6,6 +6,7 @@ import shutil
 
 import matplotlib
 import pandas as pd
+import xarray as xr
 
 from mrrpropy.raw_class import MRRProData
 
@@ -89,10 +90,11 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    mrr = MRRProData.from_file(input_file)
+    # Attach the processed NetCDF as the raprompro dataset used by the analysis
+    # and plotting methods below.
+    mrr = MRRProData(path=input_file, ds=xr.Dataset())
+    mrr.load_raprompro(input_file)
     try:
-        # The input is already a processed product.
-        mrr.raprompro = mrr.ds
         ds = mrr.raprompro
         assert ds is not None
 

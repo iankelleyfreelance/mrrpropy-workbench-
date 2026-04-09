@@ -6,7 +6,7 @@ from pathlib import Path
 from mrrpropy.raw_class import MRRProData
 
 
-DEFAULT_INPUT_FILE = Path(r"workbench/data/mrrpro81/2025/10/29/20251029_190000.nc")
+DEFAULT_INPUT_FILE = Path(r"workbench/data/mrrpro81/2025/10/29/20251029_130000.nc")
 DEFAULT_OUTPUT_DIR = Path(r"workbench/output/raprompro/2025/10/29")
 
 

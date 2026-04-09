@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib
+import xarray as xr
 
 from mrrpropy.raw_class import MRRProData
 
@@ -24,7 +25,9 @@ EXCLUDED_2D_VARIABLES = {
 
 def discover_quicklook_variables(mrr: MRRProData) -> list[str]:
     variables: list[str] = []
-    for name, da in mrr.ds.data_vars.items():
+    if mrr.raprompro is None:
+        return variables
+    for name, da in mrr.raprompro.data_vars.items():
         if da.dims == ("time", "range") and name not in EXCLUDED_2D_VARIABLES:
             variables.append(name)
     return sorted(variables)
@@ -65,9 +68,15 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    mrr = MRRProData.from_file(input_file)
+    # Attach the processed NetCDF as the raprompro dataset used by quicklook().
+    mrr = MRRProData(path=input_file, ds=xr.Dataset())
+    mrr.load_raprompro(input_file)
     try:
-        variables = args.variables if args.variables is not None else discover_quicklook_variables(mrr)
+        variables = (
+            args.variables
+            if args.variables is not None
+            else discover_quicklook_variables(mrr)
+        )
         if not variables:
             raise RuntimeError(f"No (time, range) variables found in: {input_file}")
 
@@ -76,7 +85,7 @@ def main() -> None:
         print(f"Variables   : {', '.join(variables)}")
 
         for variable in variables:
-            fig, _ = mrr.quicklook(variable=variable, source="raw")
+            fig, _ = mrr.quicklook(variable=variable, source="raprompro")
             png_path = output_dir / f"{input_file.stem}_{variable}.png"
             fig.savefig(png_path, dpi=150, bbox_inches="tight")
             fig.clf()
