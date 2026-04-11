@@ -20,6 +20,24 @@ class SupportsProcessedPlotting(Protocol):
     def _is_processed(self) -> bool: ...
 
 
+def _resolve_height_limits_km(
+    subject: SupportsProcessedPlotting,
+    explicit_limits: tuple[float, float] | None = None,
+) -> tuple[float, float] | None:
+    if explicit_limits is not None:
+        return explicit_limits
+
+    ds = subject.raprompro
+    if ds is None or "range" not in ds.coords:
+        return None
+
+    heights_km = np.asarray(ds["range"].values, dtype=float) / 1000.0
+    finite = heights_km[np.isfinite(heights_km)]
+    if finite.size == 0:
+        return None
+    return float(np.min(finite)), float(np.max(finite))
+
+
 def plot_dsdgram(
     subject: SupportsProcessedPlotting,
     *,
@@ -356,9 +374,10 @@ def plot_microphysical_properties_profiles(
     ax.set_xlim(kwargs.get("LWC_limits", (0, 3.0)))
     ax.grid(True)
 
-    if kwargs.get("y_limits") is not None:
+    y_limits = _resolve_height_limits_km(subject, kwargs.get("y_limits"))
+    if y_limits is not None:
         for axis in axs:
-            axis.set_ylim(kwargs["y_limits"])
+            axis.set_ylim(*y_limits)
 
     fig.suptitle(f"{preprocessed_status} MRR-Pro \n {selected_time_str}", fontsize=30)
 

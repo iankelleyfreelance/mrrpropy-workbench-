@@ -16,6 +16,7 @@ def test_plot_hexagram_process(artifact_dir):
             tol_center=0.15,
             savefig=True,
             output_dir=artifact_dir,
+            crop_to_process=False,
         )
 
     assert isinstance(fig, matplotlib.figure.Figure)

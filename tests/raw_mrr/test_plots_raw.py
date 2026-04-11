@@ -25,7 +25,7 @@ def test_quickplot_reflectivity_runs(raw_subset_10min_mrr, artifact_dir):
 
 def test_plot_spectrum_saves_png(raw_subset_10min_mrr, artifact_dir):
     ds = raw_subset_10min_mrr.ds
-    target_time = datetime.datetime(2025, 3, 8, 12, 5, 0)
+    target_time = datetime.datetime(2025, 10, 29, 19, 28, 0)
     target_range = float(ds["range"].values[ds.sizes["range"] // 2])
 
     fig, filepath = raw_subset_10min_mrr.plot_spectrum(
@@ -47,7 +47,7 @@ def test_plot_spectrum_saves_png(raw_subset_10min_mrr, artifact_dir):
 
 def test_plot_spectra_by_range_saves_png(raw_subset_10min_mrr, artifact_dir):
     ds = raw_subset_10min_mrr.ds
-    target_time = datetime.datetime(2025, 3, 8, 12, 5, 0)
+    target_time = datetime.datetime(2025, 10, 29, 19, 28, 0)
     ranges = ds["range"].values[[5, ds.sizes["range"] // 2, -5]].astype(float)
 
     fig, filepath = raw_subset_10min_mrr.plot_spectra_by_range(
@@ -67,7 +67,7 @@ def test_plot_spectra_by_range_saves_png(raw_subset_10min_mrr, artifact_dir):
 
 
 def test_plot_spectrogram_saves_png(raw_subset_10min_mrr, artifact_dir):
-    target_time = datetime.datetime(2025, 3, 8, 12, 5, 0)
+    target_time = datetime.datetime(2025, 10, 29, 19, 28, 0)
 
     fig, filepath = raw_subset_10min_mrr.plot_spectrogram(
         target_time,

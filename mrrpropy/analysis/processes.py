@@ -3,12 +3,19 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
+import warnings
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
+from mrrpropy.processes import (
+    PROCESS_CODES as _PROCESS_CODES,
+    PROCESS_MARKERS as _PROCESS_MARKERS,
+    PROCESS_SIGNATURES as _PROCESS_SIGNATURES,
+    ProcessSignature,
+)
 from mrrpropy.hexagram import (
-    PROCESS_SIGNATURES,
     build_rgb_from_unit_scores,
     get_hexagram_assets,
     map_rgb_to_hexagram,
@@ -16,11 +23,24 @@ from mrrpropy.hexagram import (
 from mrrpropy.utils import compute_eps, compute_monotonic_trend, ols_slope_intercept_r2
 
 
+PROCESS_SIGNATURES = _PROCESS_SIGNATURES
+PROCESS_CODES = _PROCESS_CODES
+PROCESS_MARKERS = _PROCESS_MARKERS
+
 class SupportsRainAnalysis(Protocol):
     path: str | Path
     raprompro: xr.Dataset | None
 
     def _is_processed(self) -> bool: ...
+
+
+def _resolve_processed_dataset(subject: SupportsRainAnalysis) -> xr.Dataset:
+    if not subject._is_processed():
+        raise RuntimeError("MRR-Pro data not processed (raprompro missing).")
+    ds = subject.raprompro
+    if ds is None:
+        raise RuntimeError("raprompro not loaded. Use load_raprompro().")
+    return ds
 
 
 def _resolve_min_points(
@@ -55,11 +75,114 @@ def _normalize_signatures(signature_definition: Any) -> list[tuple[int, int, int
     raise ValueError(f"Invalid process signature: {signature_definition!r}")
 
 
+def _resolve_layer_bounds(
+    *,
+    z_bottom_m: float | None = None,
+    z_top_m: float | None = None,
+    layer: tuple[float, float] | None = None,
+    z_top: float | None = None,
+    z_base: float | None = None,
+    caller: str,
+) -> tuple[float, float]:
+    has_new_bounds = z_bottom_m is not None or z_top_m is not None
+    has_layer = layer is not None
+    has_legacy_bounds = z_top is not None or z_base is not None
+
+    complete_sources = int(z_bottom_m is not None and z_top_m is not None)
+    complete_sources += int(layer is not None)
+    complete_sources += int(z_top is not None and z_base is not None)
+    if complete_sources > 1:
+        raise ValueError(
+            f"{caller} received multiple layer definitions. Use either "
+            "`z_bottom_m`/`z_top_m`, `layer=(z_bottom_m, z_top_m)`, or "
+            "legacy `z_top`/`z_base`, but not more than one."
+        )
+
+    if has_new_bounds and not (z_bottom_m is not None and z_top_m is not None):
+        raise ValueError(f"{caller} requires both z_bottom_m and z_top_m.")
+    if has_legacy_bounds and not (z_top is not None and z_base is not None):
+        raise ValueError(f"{caller} requires both legacy z_top and z_base together.")
+
+    if layer is not None:
+        warnings.warn(
+            "The `layer=(z_bottom_m, z_top_m)` argument is legacy. "
+            "Use explicit `z_bottom_m` and `z_top_m` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        z_bottom_m, z_top_m = float(layer[0]), float(layer[1])
+    elif z_top is not None and z_base is not None:
+        warnings.warn(
+            "The `z_top`/`z_base` arguments are legacy and use ambiguous naming. "
+            "Use `z_bottom_m` and `z_top_m` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        z_bottom_m, z_top_m = float(z_top), float(z_base)
+
+    if z_bottom_m is None or z_top_m is None:
+        raise ValueError(
+            f"{caller} requires a layer defined by z_bottom_m and z_top_m."
+        )
+
+    z_bottom_m = float(z_bottom_m)
+    z_top_m = float(z_top_m)
+    if z_top_m <= z_bottom_m:
+        raise ValueError("z_top_m must be greater than z_bottom_m (in meters).")
+    return z_bottom_m, z_top_m
+
+
+def _layer_metadata(
+    *,
+    z_bottom_m: float,
+    z_top_m: float,
+    selection_mode: str,
+) -> dict[str, Any]:
+    return {
+        "z_bottom_m": float(z_bottom_m),
+        "z_top_m": float(z_top_m),
+        "z_top": float(z_bottom_m),
+        "z_base": float(z_top_m),
+        "selection_mode": str(selection_mode),
+    }
+
+
+def _layer_bounds_from_attrs(attrs: dict[str, Any]) -> tuple[float, float]:
+    if "z_bottom_m" in attrs and "z_top_m" in attrs:
+        z_bottom_m = float(attrs["z_bottom_m"])
+        z_top_m = float(attrs["z_top_m"])
+    elif "z_top" in attrs and "z_base" in attrs:
+        z_bottom_m = float(attrs["z_top"])
+        z_top_m = float(attrs["z_base"])
+    else:
+        raise KeyError("Missing layer bounds in attrs.")
+    if z_top_m <= z_bottom_m:
+        raise ValueError("Layer attrs must satisfy z_top_m > z_bottom_m.")
+    return z_bottom_m, z_top_m
+
+
+def _distance_below_layer_top(z_layer: np.ndarray, *, z_top_m: float) -> np.ndarray:
+    """Return downward progress inside the layer, starting from its upper edge."""
+    return (float(z_top_m) - np.asarray(z_layer, dtype=float)).astype(float)
+
+
+def _safe_relative_change(
+    bottom: np.ndarray,
+    top: np.ndarray,
+    scale_fallback: np.ndarray,
+) -> np.ndarray:
+    scale = np.where(np.abs(top) > 0.0, np.abs(top), np.abs(scale_fallback))
+    scale = np.where(scale > 0.0, scale, np.nan)
+    return 100.0 * (bottom - top) / scale
+
+
 def compute_layer_trend_ols(
     subject: SupportsRainAnalysis,
     *,
-    z_top: float,
-    z_base: float,
+    z_bottom_m: float | None = None,
+    z_top_m: float | None = None,
+    z_top: float | None = None,
+    z_base: float | None = None,
     time_dim: str = "time",
     variable_threshold: str = "Ze",
     threshold_value: float = -5.0,
@@ -83,10 +206,15 @@ def compute_layer_trend_ols(
     if ds is None:
         raise RuntimeError("raprompro not loaded. Use load_raprompro().")
 
-    if z_base <= z_top:
-        raise ValueError("z_base must be greater than z_top (in meters).")
+    z_bottom_m, z_top_m = _resolve_layer_bounds(
+        z_bottom_m=z_bottom_m,
+        z_top_m=z_top_m,
+        z_top=z_top,
+        z_base=z_base,
+        caller="compute_layer_trend_ols",
+    )
 
-    layer = ds.sel({"range": slice(z_top, z_base)})
+    layer = ds.sel({"range": slice(z_bottom_m, z_top_m)})
 
     if time_dim not in layer.coords:
         raise KeyError(f"Missing coord '{time_dim}' in dataset.")
@@ -100,8 +228,8 @@ def compute_layer_trend_ols(
             raise KeyError(f"Missing variable '{variable_name}' in dataset.")
 
     z_layer = layer["range"].values.astype(float)
-    depth = np.abs(z_layer - float(z_top)).astype(float)
-    dz = float(z_base - z_top)
+    depth = _distance_below_layer_top(z_layer, z_top_m=float(z_top_m))
+    dz = float(z_top_m - z_bottom_m)
 
     ze = layer[variable_threshold]
     ze_mask = xr.where(np.isfinite(ze) & (ze > threshold_value), True, False)
@@ -122,8 +250,11 @@ def compute_layer_trend_ols(
 
     out.attrs.update(
         dict(
-            z_top=float(z_top),
-            z_base=float(z_base),
+            **_layer_metadata(
+                z_bottom_m=float(z_bottom_m),
+                z_top_m=float(z_top_m),
+                selection_mode="fixed_layer",
+            ),
             dz=float(dz),
             trend_method="ols_legacy",
             variable_threshold=str(variable_threshold),
@@ -133,6 +264,7 @@ def compute_layer_trend_ols(
             eps_floor_mode=str(eps_floor_mode),
             q=float(q),
             min_points_ols=int(min_points_ols),
+            trend_direction="positive means increase while descending from z_top_m to z_bottom_m",
         )
     )
 
@@ -223,8 +355,10 @@ def compute_layer_trend_ols(
 def compute_layer_trend(
     subject: SupportsRainAnalysis,
     *,
-    z_top: float,
-    z_base: float,
+    z_bottom_m: float | None = None,
+    z_top_m: float | None = None,
+    z_top: float | None = None,
+    z_base: float | None = None,
     time_dim: str = "time",
     variable_threshold: str = "Ze",
     threshold_value: float = -5.0,
@@ -257,6 +391,8 @@ def compute_layer_trend(
     if method in {"ols", "ols_legacy"}:
         out = compute_layer_trend_ols(
             subject,
+            z_bottom_m=z_bottom_m,
+            z_top_m=z_top_m,
             z_top=z_top,
             z_base=z_base,
             time_dim=time_dim,
@@ -317,10 +453,15 @@ def compute_layer_trend(
     if ds is None:
         raise RuntimeError("raprompro not loaded. Use load_raprompro().")
 
-    if z_base <= z_top:
-        raise ValueError("z_base must be greater than z_top (in meters).")
+    z_bottom_m, z_top_m = _resolve_layer_bounds(
+        z_bottom_m=z_bottom_m,
+        z_top_m=z_top_m,
+        z_top=z_top,
+        z_base=z_base,
+        caller="compute_layer_trend",
+    )
 
-    layer = ds.sel({"range": slice(z_top, z_base)})
+    layer = ds.sel({"range": slice(z_bottom_m, z_top_m)})
 
     if time_dim not in layer.coords:
         raise KeyError(f"Missing coord '{time_dim}' in dataset.")
@@ -334,8 +475,8 @@ def compute_layer_trend(
             raise KeyError(f"Missing variable '{variable_name}' in dataset.")
 
     z_layer = layer["range"].values.astype(float)
-    depth = np.abs(z_layer - float(z_top)).astype(float)
-    dz = float(z_base - z_top)
+    depth = _distance_below_layer_top(z_layer, z_top_m=float(z_top_m))
+    dz = float(z_top_m - z_bottom_m)
 
     ze = layer[variable_threshold]
     ze_mask = xr.where(np.isfinite(ze) & (ze > threshold_value), True, False)
@@ -356,8 +497,11 @@ def compute_layer_trend(
 
     out.attrs.update(
         dict(
-            z_top=float(z_top),
-            z_base=float(z_base),
+            **_layer_metadata(
+                z_bottom_m=float(z_bottom_m),
+                z_top_m=float(z_top_m),
+                selection_mode="fixed_layer",
+            ),
             dz=float(dz),
             trend_method="kendall_theilsen",
             variable_threshold=str(variable_threshold),
@@ -368,6 +512,7 @@ def compute_layer_trend(
             min_points_ols=int(resolved_min_points),
             trend_score_definition="trend_sign * trend_strength = tau outside the zero deadband",
             legacy_b_definition="For nonparametric trends, b_* aliases ts_* and is diagnostic only.",
+            trend_direction="positive means increase while descending from z_top_m to z_bottom_m",
         )
     )
 
@@ -462,7 +607,9 @@ def rain_process_analyze(
     subject: SupportsRainAnalysis,
     *,
     period: tuple[datetime, datetime],
-    layer: tuple[float, float],
+    layer: tuple[float, float] | None = None,
+    z_bottom_m: float | None = None,
+    z_top_m: float | None = None,
     k: int,
     ze_th: float = -5.0,
     trend_method: str = "kendall_theilsen",
@@ -474,7 +621,11 @@ def rain_process_analyze(
     vars_trend: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
 ) -> xr.Dataset:
     """
-    Analyse rain-process evolution in a layer over a selected period.
+    Analyse rain-process evolution in one fixed layer over a selected period.
+
+    This is the fixed-layer analysis primitive used internally by the public
+    scan workflow. Positive trend/change means increase while descending from
+    ``z_top_m`` to ``z_bottom_m``.
 
     The workflow computes method-neutral canonical trend variables used
     downstream by RGB mapping and process classification:
@@ -497,9 +648,12 @@ def rain_process_analyze(
     if ds is None:
         raise RuntimeError("raprompro not loaded. Use load_raprompro().")
 
-    z_top, z_base = layer
-    if z_base <= z_top:
-        raise ValueError("layer must satisfy z_base > z_top (meters).")
+    z_bottom_m, z_top_m = _resolve_layer_bounds(
+        z_bottom_m=z_bottom_m,
+        z_top_m=z_top_m,
+        layer=layer,
+        caller="rain_process_analyze",
+    )
 
     t0, t1 = period
     if t0 >= t1:
@@ -517,8 +671,8 @@ def rain_process_analyze(
 
     trends = compute_layer_trend(
         subject,
-        z_top=z_top,
-        z_base=z_base,
+        z_bottom_m=z_bottom_m,
+        z_top_m=z_top_m,
         variable_threshold="Ze",
         threshold_value=ze_th,
         vars=vars_trend,
@@ -568,8 +722,11 @@ def rain_process_analyze(
         dict(
             period_start=str(np.datetime_as_string(ds_sub["time"].values[0], unit="s")),
             period_end=str(np.datetime_as_string(ds_sub["time"].values[-1], unit="s")),
-            z_top=float(z_top),
-            z_base=float(z_base),
+            **_layer_metadata(
+                z_bottom_m=float(z_bottom_m),
+                z_top_m=float(z_top_m),
+                selection_mode="fixed_layer",
+            ),
             k=int(k),
             ze_th=float(ze_th),
             trend_method="ols" if method in {"ols", "ols_legacy"} else "kendall_theilsen",
@@ -625,8 +782,24 @@ def classify_rain_process(
 
     expected = {"R": "Dm", "G": "Nw", "B": "LWC"}
     rgb_map = analysis.attrs.get("rgb_mapping", None)
-    if rgb_map != expected:
-        raise ValueError(f"rgb_mapping={rgb_map} but this classifier expects {expected}.")
+
+    variable_names = ("Dm", "Nw", "LWC")
+    has_trend_fields = all(
+        f"{prefix}_{variable_name}" in analysis
+        for prefix in ("trend_sign", "trend_strength", "trend_p")
+        for variable_name in variable_names
+    )
+
+    if not has_trend_fields:
+        if rgb_map != expected:
+            raise ValueError(f"rgb_mapping={rgb_map} but this classifier expects {expected}.")
+    elif rgb_map is not None and rgb_map != expected:
+        warnings.warn(
+            f"rgb_mapping={rgb_map} but canonical classification does not depend on rgb_mapping "
+            f"(expected {expected} for legacy RGB fallback).",
+            UserWarning,
+            stacklevel=2,
+        )
 
     tau_strength_threshold = (
         float(min_tau_strength) if min_tau_strength is not None else float(min_strength)
@@ -635,80 +808,24 @@ def classify_rain_process(
         float(max_tau_pvalue) if max_tau_pvalue is not None else max_p_value
     )
 
-    variable_names = ("Dm", "Nw", "LWC")
-    has_trend_fields = all(
-        f"{prefix}_{variable_name}" in analysis
-        for prefix in ("trend_sign", "trend_strength", "trend_score", "trend_mag", "trend_p")
-        for variable_name in variable_names
-    )
-
     out = xr.Dataset(coords={"time": analysis["time"].values})
+    if "layer" in analysis.dims and "layer" in analysis.coords:
+        out = out.assign_coords(layer=analysis["layer"].values)
 
     if has_trend_fields:
-        p_data = {
-            variable_name: analysis[f"trend_p_{variable_name}"].values.astype(float)
-            for variable_name in variable_names
-        }
-        sign_data = {
-            variable_name: analysis[f"trend_sign_{variable_name}"].values.astype(int)
-            for variable_name in variable_names
-        }
-        strength_data = {
-            variable_name: analysis[f"trend_strength_{variable_name}"].values.astype(float)
-            for variable_name in variable_names
-        }
-
-        ok = np.ones_like(strength_data["Dm"], dtype=bool)
-        for variable_name in variable_names:
-            ok &= np.isfinite(strength_data[variable_name])
-
-        strength = np.full(ok.shape, np.nan, dtype=float)
-        if np.any(ok):
-            strength[ok] = np.minimum.reduce(
-                [
-                    strength_data["Dm"][ok],
-                    strength_data["Nw"][ok],
-                    strength_data["LWC"][ok],
-                ]
-            )
-
-        p_filter = np.ones_like(ok, dtype=bool)
-        if p_value_threshold is not None:
-            p_filter = ok.copy()
-            for variable_name in variable_names:
-                p_filter &= np.isfinite(p_data[variable_name])
-                p_filter &= p_data[variable_name] <= float(p_value_threshold)
-
-        label = np.full(ok.shape, "no_data", dtype=object)
-        label[ok] = "unknown"
-
-        sign_r = sign_data["Dm"].copy()
-        sign_g = sign_data["Nw"].copy()
-        sign_b = sign_data["LWC"].copy()
-
-        for process_name, signature_definition in PROCESS_SIGNATURES.items():
-            signatures = _normalize_signatures(signature_definition)
-            process_mask = np.zeros(ok.shape, dtype=bool)
-            for sign_r_expected, sign_g_expected, sign_b_expected in signatures:
-                process_mask |= (
-                    ok
-                    & (sign_r == sign_r_expected)
-                    & (sign_g == sign_g_expected)
-                    & (sign_b == sign_b_expected)
-                )
-            take = process_mask & (label == "unknown")
-            label[take] = process_name
-
-        weak = ok & (strength < tau_strength_threshold)
-        if p_value_threshold is not None:
-            weak |= ok & ~p_filter
-        label[weak] = "steady_or_weak"
-
-        out["proc_label"] = xr.DataArray(label, dims=("time",))
-        out["sign_R"] = xr.DataArray(sign_r, dims=("time",))
-        out["sign_G"] = xr.DataArray(sign_g, dims=("time",))
-        out["sign_B"] = xr.DataArray(sign_b, dims=("time",))
-        out["strength"] = xr.DataArray(strength, dims=("time",))
+        core = _classify_from_microphysical_trends(
+            analysis,
+            variables=variable_names,
+            min_strength=min_strength,
+            min_tau_strength=min_tau_strength,
+            max_p_value=max_p_value,
+            max_tau_pvalue=max_tau_pvalue,
+        )
+        out["proc_label"] = core["proc_label"]
+        out["strength"] = core["strength"]
+        out["sign_R"] = core["sign_Dm"]
+        out["sign_G"] = core["sign_Nw"]
+        out["sign_B"] = core["sign_LWC"]
 
         for variable_name in variable_names:
             for prefix in ("tau", "p", "sign", "strength", "ts", "intercept_ts"):
@@ -801,9 +918,9 @@ def classify_rain_process(
         out.attrs["tol_center"] = float(tol_center)
         out.attrs["min_strength"] = float(min_strength)
 
-    out["R"] = analysis["R"]
-    out["G"] = analysis["G"]
-    out["B"] = analysis["B"]
+    for variable_name in ("R", "G", "B"):
+        if variable_name in analysis:
+            out[variable_name] = analysis[variable_name]
 
     for variable_name in (
         "hex_x",
@@ -817,14 +934,17 @@ def classify_rain_process(
         if variable_name in analysis:
             out[variable_name] = analysis[variable_name]
 
-    out.attrs["rgb_mapping"] = rgb_map
+    out.attrs["rgb_mapping"] = rgb_map if rgb_map is not None else expected
 
     for key in (
         "rgb_convention",
         "period_start",
         "period_end",
+        "z_bottom_m",
+        "z_top_m",
         "z_top",
         "z_base",
+        "selection_mode",
         "k",
         "rgb_q",
         "eps_q",
@@ -838,3 +958,674 @@ def classify_rain_process(
             out.attrs[key] = analysis.attrs[key]
 
     return out
+
+
+def _coords_for_sample_dims(ds: xr.Dataset, sample_dims: tuple[str, ...]) -> dict[str, Any]:
+    coords: dict[str, Any] = {}
+    for dim in sample_dims:
+        if dim in ds.coords:
+            coords[dim] = ds[dim].values
+    return coords
+
+
+def _classify_from_microphysical_trends(
+    ds: xr.Dataset,
+    *,
+    variables: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
+    min_strength: float = 0.10,
+    min_tau_strength: float | None = None,
+    max_p_value: float | None = None,
+    max_tau_pvalue: float | None = None,
+) -> xr.Dataset:
+    """
+    Pure classification core based only on canonical microphysical trends.
+
+    Required fields (for each variable in `variables`):
+    - trend_sign_*
+    - trend_strength_*
+    - trend_p_*
+    """
+    if "time" not in ds.coords:
+        raise KeyError("ds must include the 'time' coordinate.")
+
+    tau_strength_threshold = (
+        float(min_tau_strength) if min_tau_strength is not None else float(min_strength)
+    )
+    p_value_threshold = float(max_tau_pvalue) if max_tau_pvalue is not None else max_p_value
+
+    for variable_name in variables:
+        for prefix in ("trend_sign", "trend_strength", "trend_p"):
+            key = f"{prefix}_{variable_name}"
+            if key not in ds:
+                raise KeyError(f"Missing required field '{key}' for classification.")
+
+    strength_ref = ds[f"trend_strength_{variables[0]}"]
+    sample_dims = tuple(strength_ref.dims)
+
+    p_data = {
+        variable_name: ds[f"trend_p_{variable_name}"].values.astype(float)
+        for variable_name in variables
+    }
+    sign_data = {
+        variable_name: ds[f"trend_sign_{variable_name}"].values.astype(int)
+        for variable_name in variables
+    }
+    strength_data = {
+        variable_name: ds[f"trend_strength_{variable_name}"].values.astype(float)
+        for variable_name in variables
+    }
+
+    ok = np.ones_like(strength_data[variables[0]], dtype=bool)
+    for variable_name in variables:
+        ok &= np.isfinite(strength_data[variable_name])
+
+    strength = np.full(ok.shape, np.nan, dtype=float)
+    if np.any(ok):
+        strength[ok] = np.minimum.reduce(
+            [
+                strength_data[variables[0]][ok],
+                strength_data[variables[1]][ok],
+                strength_data[variables[2]][ok],
+            ]
+        )
+
+    p_filter = np.ones_like(ok, dtype=bool)
+    if p_value_threshold is not None:
+        p_filter = ok.copy()
+        for variable_name in variables:
+            p_filter &= np.isfinite(p_data[variable_name])
+            p_filter &= p_data[variable_name] <= float(p_value_threshold)
+
+    label = np.full(ok.shape, "no_data", dtype=object)
+    label[ok] = "unknown"
+
+    sign_r = sign_data[variables[0]].copy()
+    sign_g = sign_data[variables[1]].copy()
+    sign_b = sign_data[variables[2]].copy()
+
+    for process_name, signature_definition in PROCESS_SIGNATURES.items():
+        signatures = _normalize_signatures(signature_definition)
+        process_mask = np.zeros(ok.shape, dtype=bool)
+        for sign_r_expected, sign_g_expected, sign_b_expected in signatures:
+            process_mask |= (
+                ok
+                & (sign_r == sign_r_expected)
+                & (sign_g == sign_g_expected)
+                & (sign_b == sign_b_expected)
+            )
+        take = process_mask & (label == "unknown")
+        label[take] = process_name
+
+    weak = ok & (strength < tau_strength_threshold)
+    if p_value_threshold is not None:
+        weak |= ok & ~p_filter
+    label[weak] = "steady_or_weak"
+
+    out = xr.Dataset(coords=_coords_for_sample_dims(ds, sample_dims))
+    out["proc_label"] = xr.DataArray(label, dims=sample_dims)
+    out["strength"] = xr.DataArray(strength, dims=sample_dims)
+    out["sign_Dm"] = xr.DataArray(sign_r, dims=sample_dims)
+    out["sign_Nw"] = xr.DataArray(sign_g, dims=sample_dims)
+    out["sign_LWC"] = xr.DataArray(sign_b, dims=sample_dims)
+
+    out.attrs["classification_basis"] = "canonical_microphysical_trends"
+    out.attrs["strength_definition"] = "min(trend_strength_Dm, trend_strength_Nw, trend_strength_LWC)"
+    out.attrs["min_tau_strength"] = float(tau_strength_threshold)
+    out.attrs["min_strength"] = float(tau_strength_threshold)
+    out.attrs["max_tau_pvalue"] = float(p_value_threshold) if p_value_threshold is not None else None
+    return out
+
+
+def classify_process_from_features(
+    process_features: xr.Dataset,
+    *,
+    refiners: list[Any] | None = None,
+    min_strength: float = 0.10,
+    min_tau_strength: float | None = None,
+    max_p_value: float | None = None,
+    max_tau_pvalue: float | None = None,
+) -> xr.Dataset:
+    """
+    Phase B wrapper: classify directly from `process_features` (Phase A output).
+
+    This wrapper never depends on RGB/hexagram fields. The baseline label is
+    stored as `proc_label_base`. Future refiners may update `proc_label` while
+    keeping `proc_label_base` intact.
+    """
+    if process_features is None or not isinstance(process_features, xr.Dataset):
+        raise TypeError("process_features must be an xr.Dataset produced by build_process_features.")
+    if "time" not in process_features.coords:
+        raise KeyError("process_features must include the 'time' coordinate.")
+
+    variables = ("Dm", "Nw", "LWC")
+    core = _classify_from_microphysical_trends(
+        process_features,
+        variables=variables,
+        min_strength=min_strength,
+        min_tau_strength=min_tau_strength,
+        max_p_value=max_p_value,
+        max_tau_pvalue=max_tau_pvalue,
+    )
+
+    # Build a minimal classification dataset without RGB/hexagram attachments.
+    sample_dims = tuple(core["proc_label"].dims)
+    out = xr.Dataset(coords=_coords_for_sample_dims(process_features, sample_dims))
+    for name in ("z_top", "z_bottom", "z_center"):
+        if name in process_features.coords:
+            out = out.assign_coords({name: process_features.coords[name]})
+    out["proc_label_base"] = core["proc_label"]
+    out["proc_label"] = core["proc_label"].copy()
+    out["strength"] = core["strength"]
+
+    out["sign_Dm"] = core["sign_Dm"]
+    out["sign_Nw"] = core["sign_Nw"]
+    out["sign_LWC"] = core["sign_LWC"]
+    out["sign_R"] = out["sign_Dm"]
+    out["sign_G"] = out["sign_Nw"]
+    out["sign_B"] = out["sign_LWC"]
+
+    out.attrs["classification_stage1"] = "PROCESS_SIGNATURES"
+    out.attrs["classification_basis"] = "canonical_microphysical_trends"
+    out.attrs["min_tau_strength"] = float(
+        float(min_tau_strength) if min_tau_strength is not None else float(min_strength)
+    )
+    out.attrs["max_tau_pvalue"] = (
+        float(max_tau_pvalue) if max_tau_pvalue is not None else max_p_value
+    )
+
+    if refiners:
+        for refiner in refiners:
+            out = refiner(process_features, out)
+
+    return out
+
+
+def build_process_dynamics_dataframe(
+    subject: SupportsRainAnalysis,
+    *,
+    analysis: xr.Dataset,
+    classified: xr.Dataset,
+    variables: tuple[str, ...] = ("Dm", "Nw", "LWC"),
+) -> pd.DataFrame:
+    """
+    Build a per-sample dataframe to quantify rain-process behaviour in a layer.
+
+    The returned dataframe follows the physical descending-rain convention used
+    by the rain-process pipeline: ``*_delta`` and ``*_rate_per_km`` represent
+    the change from the top of the layer (``z_top_m``) down to the bottom
+    (``z_bottom_m``).
+
+    For each requested variable, the dataframe includes:
+
+    - values at the top and bottom of the layer,
+    - descending top-to-bottom net change,
+    - relative change in percent,
+    - net rate per kilometre across the layer,
+    - trend diagnostics copied from ``analysis`` when available.
+    """
+    ds = _resolve_processed_dataset(subject)
+
+    if not isinstance(analysis, xr.Dataset):
+        raise TypeError("analysis must be an xr.Dataset.")
+    if not isinstance(classified, xr.Dataset):
+        raise TypeError("classified must be an xr.Dataset.")
+    if "time" not in analysis.coords or "time" not in classified.coords:
+        raise KeyError("analysis and classified must contain the 'time' coordinate.")
+
+    z_bottom_m, z_top_m = _layer_bounds_from_attrs(analysis.attrs)
+
+    time_values = analysis["time"].values
+    if time_values.size == 0:
+        raise ValueError("analysis does not contain any time samples.")
+    time_start = time_values[0]
+    time_end = time_values[-1]
+
+    ds_event = ds.sel(time=slice(time_start, time_end))
+    if ds_event.sizes.get("time", 0) == 0:
+        raise ValueError("No processed samples fall inside the analysis period.")
+
+    top_level = ds_event.sel(range=z_top_m, method="nearest")
+    bottom_level = ds_event.sel(range=z_bottom_m, method="nearest")
+    layer_mean = ds_event.sel(range=slice(z_bottom_m, z_top_m)).mean("range", skipna=True)
+
+    base = xr.Dataset(coords={"time": analysis["time"].values})
+    for source in (analysis, classified, top_level, bottom_level, layer_mean):
+        base, source_aligned = xr.align(base, source, join="inner")
+        for name in source_aligned.data_vars:
+            if name not in base:
+                base[name] = source_aligned[name]
+
+    if base.sizes.get("time", 0) == 0:
+        raise ValueError("analysis/classified do not overlap with the processed dataset.")
+
+    index = pd.to_datetime(base["time"].values)
+    df = pd.DataFrame(index=index)
+    df.index.name = "time"
+
+    df["proc_label"] = base["proc_label"].values.astype(str)
+    if "strength" in base:
+        df["proc_strength"] = base["strength"].values.astype(float)
+    if "minutes" in base:
+        df["minutes"] = base["minutes"].values.astype(float)
+
+    df["z_bottom_m"] = float(z_bottom_m)
+    df["z_top_m"] = float(z_top_m)
+    df["z_base_m"] = float(z_top_m)
+    df["dz_m"] = float(z_top_m - z_bottom_m)
+    df["dz_km"] = float((z_top_m - z_bottom_m) / 1000.0)
+    df["layer_top_range_m"] = float(top_level["range"].values)
+    df["layer_bottom_range_m"] = float(bottom_level["range"].values)
+
+    for passthrough_name in (
+        "R",
+        "G",
+        "B",
+        "hex_x",
+        "hex_y",
+        "hex_area",
+        "minutes",
+        "sign_R",
+        "sign_G",
+        "sign_B",
+    ):
+        if passthrough_name in base:
+            df[passthrough_name] = pd.to_numeric(
+                base[passthrough_name].values,
+                errors="coerce",
+            )
+
+    for sign_name in ("sign_R", "sign_G", "sign_B"):
+        if sign_name in base:
+            df[sign_name] = base[sign_name].values.astype(int)
+
+    for variable_name in variables:
+        if variable_name not in ds_event:
+            raise KeyError(f"Variable '{variable_name}' not found in processed dataset.")
+
+        top_values = top_level[variable_name].sel(time=base["time"]).values.astype(float)
+        bottom_values = bottom_level[variable_name].sel(time=base["time"]).values.astype(float)
+        mean_values = layer_mean[variable_name].sel(time=base["time"]).values.astype(float)
+
+        delta_values = bottom_values - top_values
+        delta_pct_values = _safe_relative_change(
+            bottom_values,
+            top_values,
+            mean_values,
+        )
+        rate_values = delta_values / float((z_top_m - z_bottom_m) / 1000.0)
+
+        df[f"{variable_name}_top"] = top_values
+        df[f"{variable_name}_bottom"] = bottom_values
+        df[f"{variable_name}_layer_mean"] = mean_values
+        df[f"{variable_name}_delta"] = delta_values
+        df[f"{variable_name}_delta_pct"] = delta_pct_values
+        df[f"{variable_name}_rate_per_km"] = rate_values
+
+        for prefix in (
+            "tau",
+            "p",
+            "ts",
+            "intercept_ts",
+            "sign",
+            "strength",
+            "trend_mag",
+            "trend_sign",
+            "trend_strength",
+            "trend_score",
+            "trend_p",
+            "b",
+            "r2",
+        ):
+            field = f"{prefix}_{variable_name}"
+            if field in base:
+                values = base[field].values
+                if np.issubdtype(values.dtype, np.integer):
+                    df[field] = values.astype(int)
+                else:
+                    df[field] = values.astype(float)
+
+    df.attrs = {
+        "trend_method": analysis.attrs.get("trend_method"),
+        "trend_direction": analysis.attrs.get(
+            "trend_direction",
+            "positive means increase while descending from z_top_m to z_bottom_m",
+        ),
+        "period_start": analysis.attrs.get("period_start"),
+        "period_end": analysis.attrs.get("period_end"),
+        **_layer_metadata(
+            z_bottom_m=z_bottom_m,
+            z_top_m=z_top_m,
+            selection_mode=str(analysis.attrs.get("selection_mode", "fixed_layer")),
+        ),
+    }
+    return df
+
+
+def summarize_process_dynamics(
+    subject: SupportsRainAnalysis,
+    *,
+    analysis: xr.Dataset,
+    classified: xr.Dataset,
+    variables: tuple[str, ...] = ("Dm", "Nw", "LWC"),
+) -> pd.DataFrame:
+    """
+    Summarize per-process layer dynamics into a compact grouped dataframe.
+
+    The summary reports, for each process label, the sample count plus
+    descriptive statistics of the descending top-to-bottom changes and the
+    canonical trend diagnostics.
+    """
+    df = build_process_dynamics_dataframe(
+        subject,
+        analysis=analysis,
+        classified=classified,
+        variables=variables,
+    )
+    if df.empty:
+        return pd.DataFrame()
+
+    metrics: list[str] = ["proc_strength"]
+    for variable_name in variables:
+        metrics.extend(
+            [
+                f"{variable_name}_delta",
+                f"{variable_name}_delta_pct",
+                f"{variable_name}_rate_per_km",
+                f"trend_strength_{variable_name}",
+                f"trend_score_{variable_name}",
+            ]
+        )
+        for optional_field in (f"tau_{variable_name}", f"ts_{variable_name}"):
+            if optional_field in df.columns:
+                metrics.append(optional_field)
+
+    metrics = [metric for metric in metrics if metric in df.columns]
+
+    rows: list[dict[str, float | str | int]] = []
+    grouped = df.groupby("proc_label", dropna=False)
+    for proc_label, group in grouped:
+        row: dict[str, float | str | int] = {
+            "proc_label": str(proc_label),
+            "n_samples": int(len(group)),
+            "fraction": float(len(group) / len(df)),
+        }
+        for metric in metrics:
+            values = pd.to_numeric(group[metric], errors="coerce")
+            finite = values[np.isfinite(values)]
+            row[f"{metric}_median"] = float(finite.median()) if not finite.empty else np.nan
+            row[f"{metric}_q25"] = float(finite.quantile(0.25)) if not finite.empty else np.nan
+            row[f"{metric}_q75"] = float(finite.quantile(0.75)) if not finite.empty else np.nan
+            row[f"{metric}_mean"] = float(finite.mean()) if not finite.empty else np.nan
+        rows.append(row)
+
+    summary = pd.DataFrame(rows).sort_values(
+        by=["n_samples", "proc_label"],
+        ascending=[False, True],
+    )
+    summary.attrs = dict(df.attrs)
+    summary.attrs["summary_level"] = "proc_label"
+    return summary.reset_index(drop=True)
+
+
+def _build_sliding_layer_windows(
+    range_values: np.ndarray,
+    *,
+    window_thickness_m: float,
+    window_step_m: float,
+) -> list[tuple[float, float]]:
+    finite_ranges = np.sort(np.asarray(range_values, dtype=float)[np.isfinite(range_values)])
+    if finite_ranges.size == 0:
+        return []
+
+    z_min = float(finite_ranges.min())
+    z_max = float(finite_ranges.max())
+    if window_thickness_m <= 0.0:
+        raise ValueError("window_thickness_m must be positive.")
+    if window_step_m <= 0.0:
+        raise ValueError("window_step_m must be positive.")
+    if z_max - z_min < window_thickness_m:
+        return []
+
+    starts = np.arange(
+        z_min,
+        z_max - float(window_thickness_m) + float(window_step_m) * 0.5,
+        float(window_step_m),
+        dtype=float,
+    )
+    windows: list[tuple[float, float]] = []
+    for start in starts:
+        stop = float(start + window_thickness_m)
+        if stop <= z_max + 1e-6:
+            windows.append((float(start), stop))
+    return windows
+
+
+def _detect_process_runs_from_scan(
+    scan_df: pd.DataFrame,
+    *,
+    min_consecutive_profiles: int,
+    ignored_labels: set[str] | None = None,
+) -> pd.DataFrame:
+    if min_consecutive_profiles <= 0:
+        raise ValueError("min_consecutive_profiles must be positive.")
+    if scan_df.empty:
+        return pd.DataFrame()
+
+    ignored = (
+        {"no_data", "unknown", "steady_or_weak"}
+        if ignored_labels is None
+        else set(ignored_labels)
+    )
+
+    rows: list[dict[str, object]] = []
+    df = scan_df.sort_values(["window_id", "time"]).copy()
+
+    for window_id, group in df.groupby("window_id", sort=True):
+        labels = group["proc_label"].astype(str).to_numpy()
+        times = pd.to_datetime(group["time"]).to_numpy()
+        if labels.size == 0:
+            continue
+
+        start = 0
+        for idx in range(1, labels.size + 1):
+            closed = idx == labels.size or labels[idx] != labels[start]
+            if not closed:
+                continue
+
+            label = labels[start]
+            run_length = idx - start
+            if label not in ignored and run_length >= min_consecutive_profiles:
+                run = group.iloc[start:idx]
+                dt_seconds = np.nan
+                if run_length > 1:
+                    diffs = np.diff(times[start:idx]) / np.timedelta64(1, "s")
+                    if diffs.size:
+                        dt_seconds = float(np.nanmedian(diffs))
+                if not np.isfinite(dt_seconds):
+                    dt_seconds = np.nan
+                duration_seconds = (
+                    float(run_length * dt_seconds) if np.isfinite(dt_seconds) else np.nan
+                )
+
+                row: dict[str, object] = {
+                    "window_id": int(window_id),
+                    "proc_label": str(label),
+                    "start_time": pd.Timestamp(times[start]),
+                    "end_time": pd.Timestamp(times[idx - 1]),
+                    "n_profiles": int(run_length),
+                    "dt_seconds": dt_seconds,
+                    "duration_seconds": duration_seconds,
+                }
+
+                for meta_field in (
+                    "z_min_m",
+                    "z_max_m",
+                    "z_bottom_m",
+                    "z_top_m",
+                    "z_center_m",
+                    "window_thickness_m",
+                    "window_step_m",
+                    "trend_method",
+                    "selection_mode",
+                ):
+                    if meta_field in run.columns:
+                        row[meta_field] = run.iloc[0][meta_field]
+
+                for metric in (
+                    "proc_strength",
+                    "Dm_delta_pct",
+                    "Nw_delta_pct",
+                    "LWC_delta_pct",
+                    "Dm_rate_per_km",
+                    "Nw_rate_per_km",
+                    "LWC_rate_per_km",
+                    "tau_Dm",
+                    "tau_Nw",
+                    "tau_LWC",
+                    "trend_strength_Dm",
+                    "trend_strength_Nw",
+                    "trend_strength_LWC",
+                    "trend_score_Dm",
+                    "trend_score_Nw",
+                    "trend_score_LWC",
+                ):
+                    if metric in run.columns:
+                        values = pd.to_numeric(run[metric], errors="coerce")
+                        finite = values[np.isfinite(values)]
+                        row[f"{metric}_mean"] = (
+                            float(finite.mean()) if not finite.empty else np.nan
+                        )
+                        row[f"{metric}_median"] = (
+                            float(finite.median()) if not finite.empty else np.nan
+                        )
+
+                rows.append(row)
+
+            start = idx
+
+    episodes = pd.DataFrame(rows)
+    if episodes.empty:
+        return episodes
+    return episodes.sort_values(
+        by=["start_time", "z_min_m", "proc_label"],
+        ascending=[True, True, True],
+    ).reset_index(drop=True)
+
+
+def build_column_process_scan_dataframe(
+    subject: SupportsRainAnalysis,
+    *,
+    period: tuple[datetime, datetime],
+    k: int,
+    window_thickness_m: float = 1000.0,
+    window_step_m: float = 100.0,
+    min_tau_strength: float = 0.10,
+    ze_th: float = -5.0,
+    trend_method: str = "kendall_theilsen",
+    tau_zero_tol: float = 0.05,
+    min_points_trend: int | None = None,
+    min_points_ols: int | None = None,
+    eps_q: float = 0.01,
+    rgb_q: float = 0.02,
+    vars_trend: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
+    max_tau_pvalue: float | None = None,
+) -> pd.DataFrame:
+    """
+    Scan the whole processed column with a sliding vertical window.
+
+    For each window, the function runs the standard rain-process analysis and
+    classification pipeline, then exports a per-sample dataframe. The output is
+    therefore indexed by both time and layer window, and is intended as the
+    input for consecutive-profile episode detection.
+    """
+    ds = _resolve_processed_dataset(subject)
+    if period[0] >= period[1]:
+        raise ValueError("period must be increasing (start, end).")
+
+    windows = _build_sliding_layer_windows(
+        ds["range"].values,
+        window_thickness_m=float(window_thickness_m),
+        window_step_m=float(window_step_m),
+    )
+    if not windows:
+        return pd.DataFrame()
+
+    frames: list[pd.DataFrame] = []
+    for window_id, (z_min_m, z_max_m) in enumerate(windows):
+        analysis = rain_process_analyze(
+            subject,
+            period=period,
+            z_bottom_m=z_min_m,
+            z_top_m=z_max_m,
+            k=k,
+            ze_th=ze_th,
+            trend_method=trend_method,
+            tau_zero_tol=tau_zero_tol,
+            min_points_trend=min_points_trend,
+            min_points_ols=min_points_ols,
+            eps_q=eps_q,
+            rgb_q=rgb_q,
+            vars_trend=vars_trend,
+        )
+        classified = classify_rain_process(
+            subject,
+            analysis=analysis,
+            min_tau_strength=min_tau_strength,
+            max_tau_pvalue=max_tau_pvalue,
+        )
+        frame = build_process_dynamics_dataframe(
+            subject,
+            analysis=analysis,
+            classified=classified,
+            variables=vars_trend,
+        ).reset_index()
+        frame["window_id"] = int(window_id)
+        frame["z_min_m"] = float(z_min_m)
+        frame["z_max_m"] = float(z_max_m)
+        frame["z_bottom_m"] = float(z_min_m)
+        frame["z_top_m"] = float(z_max_m)
+        frame["z_center_m"] = float(0.5 * (z_min_m + z_max_m))
+        frame["window_thickness_m"] = float(window_thickness_m)
+        frame["window_step_m"] = float(window_step_m)
+        frame["trend_method"] = str(analysis.attrs.get("trend_method", trend_method))
+        frame["selection_mode"] = "scan"
+        frames.append(frame)
+
+    scan_df = pd.concat(frames, ignore_index=True)
+    scan_df.attrs = {
+        "period_start": str(np.datetime_as_string(np.datetime64(period[0]), unit="s")),
+        "period_end": str(np.datetime_as_string(np.datetime64(period[1]), unit="s")),
+        "window_thickness_m": float(window_thickness_m),
+        "window_step_m": float(window_step_m),
+        "min_tau_strength": float(min_tau_strength),
+        "trend_method": str(trend_method),
+        "tau_zero_tol": float(tau_zero_tol),
+        "k": int(k),
+        "selection_mode": "scan",
+    }
+    return scan_df
+
+
+def detect_column_process_episodes(
+    subject: SupportsRainAnalysis,
+    *,
+    scan_df: pd.DataFrame,
+    min_consecutive_profiles: int = 6,
+) -> pd.DataFrame:
+    """
+    Detect temporally persistent process episodes from a column scan dataframe.
+
+    Only named microphysical processes are promoted to episodes; isolated
+    ``unknown`` or ``steady_or_weak`` samples are ignored. Episodes are defined
+    independently in each sliding vertical window.
+    """
+    del subject
+    if not isinstance(scan_df, pd.DataFrame):
+        raise TypeError("scan_df must be a pandas DataFrame.")
+    episodes = _detect_process_runs_from_scan(
+        scan_df,
+        min_consecutive_profiles=int(min_consecutive_profiles),
+    )
+    episodes.attrs = dict(getattr(scan_df, "attrs", {}))
+    episodes.attrs["min_consecutive_profiles"] = int(min_consecutive_profiles)
+    return episodes
