@@ -6,6 +6,7 @@ from typing import Any, Protocol, cast
 
 import matplotlib.dates as mdates
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 import numpy as np
@@ -1152,6 +1153,272 @@ def plot_column_process_scan(
         safe_t1 = str(period_end or "t1").replace(":", "").replace("-", "").replace(" ", "_")
         filepath = outdir / f"column_process_scan_{color_mode}_{safe_t0}_{safe_t1}.png"
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
+
+    return fig, filepath
+
+
+def plot_fused_process_quicklook(
+    scan_df: pd.DataFrame,
+    fused_df: pd.DataFrame,
+    *,
+    processes: list[str] | None = None,
+    time_col: str = "time",
+    z_top_col: str = "z_top",
+    z_bottom_col: str = "z_bottom",
+    process_col: str = "proc_label",
+    z_top_fused_col: str = "z_top_fused",
+    z_bottom_fused_col: str = "z_bottom_fused",
+    process_fused_col: str = "proc_label_fused",
+    figsize: tuple[float, float] = (10, 6),
+    alpha_scan: float = 0.2,
+    alpha_fused: float = 0.6,
+    savefig: bool = False,
+    output_dir: Path | None = None,
+    dpi: int = 200,
+    **kwargs: Any,
+) -> tuple[Figure, Path | None]:
+    """
+    Quicklook plot to visually validate fused vertical process events.
+
+    The plot overlays:
+    - the original scan detections as semi-transparent points (context),
+    - fused events as vertical rectangles at each time step.
+
+    This is a lightweight diagnostic plot intended for exploratory validation.
+
+    The layout, defaults, and ``savefig`` behaviour are intentionally aligned
+    with :func:`plot_column_process_scan` to make quicklooks consistent across
+    the package.
+
+    If ``processes`` is provided, both the scan background and fused rectangles
+    are filtered to show only those process labels (same behaviour as
+    :func:`plot_column_process_scan`).
+    """
+    if not isinstance(scan_df, pd.DataFrame):
+        raise TypeError("scan_df must be a pandas DataFrame.")
+    if not isinstance(fused_df, pd.DataFrame):
+        raise TypeError("fused_df must be a pandas DataFrame.")
+    if scan_df.empty and fused_df.empty:
+        raise ValueError("scan_df and fused_df are both empty.")
+
+    process_colors = {
+        "breakup": "#12af54",
+        "growth_depletion": "#1b9e77",
+        "growth_depletion_gain": "#f808d0",
+        "growth_depletion_loss": "#ff0000",
+        "evaporation": "#000000",
+        "growth": "#91209b",
+        "activation": "#66a61e",
+        "steady_or_weak": "#bdbdbd",
+        "unknown": "#666666",
+        "no_data": "#f0f0f0",
+    }
+
+    def _resolve_column(df: pd.DataFrame, requested: str, alternatives: tuple[str, ...]) -> str:
+        if requested in df.columns:
+            return requested
+        for alt in alternatives:
+            if alt in df.columns:
+                return alt
+        raise KeyError(f"Missing column {requested!r} in dataframe.")
+
+    scan_time_col = _resolve_column(scan_df, time_col, ("time",))
+    scan_proc_col = _resolve_column(scan_df, process_col, ("proc_label",))
+    scan_top_col = _resolve_column(scan_df, z_top_col, ("z_top_m", "z_max_m"))
+    scan_bottom_col = _resolve_column(scan_df, z_bottom_col, ("z_bottom_m", "z_min_m"))
+
+    fused_time_col = _resolve_column(fused_df, time_col, ("time",))
+    fused_proc_col = _resolve_column(fused_df, process_fused_col, ("proc_label_fused", "proc_label"))
+    fused_top_col = _resolve_column(fused_df, z_top_fused_col, ("z_top_fused",))
+    fused_bottom_col = _resolve_column(fused_df, z_bottom_fused_col, ("z_bottom_fused",))
+
+    df_scan = scan_df.copy()
+    df_fused = fused_df.copy()
+
+    df_scan[scan_time_col] = pd.to_datetime(df_scan[scan_time_col])
+    df_scan[scan_proc_col] = df_scan[scan_proc_col].astype(str)
+    df_scan[scan_top_col] = pd.to_numeric(df_scan[scan_top_col], errors="coerce")
+    df_scan[scan_bottom_col] = pd.to_numeric(df_scan[scan_bottom_col], errors="coerce")
+
+    df_fused[fused_time_col] = pd.to_datetime(df_fused[fused_time_col])
+    df_fused[fused_proc_col] = df_fused[fused_proc_col].astype(str)
+    df_fused[fused_top_col] = pd.to_numeric(df_fused[fused_top_col], errors="coerce")
+    df_fused[fused_bottom_col] = pd.to_numeric(df_fused[fused_bottom_col], errors="coerce")
+
+    if processes is not None:
+        selected_processes = {str(process) for process in processes if process is not None}
+        df_scan = df_scan[df_scan[scan_proc_col].isin(selected_processes)].copy()
+        df_fused = df_fused[df_fused[fused_proc_col].isin(selected_processes)].copy()
+
+    # Build a deterministic color map across all labels present.
+    all_labels = pd.unique(
+        pd.concat(
+            [
+                df_scan[scan_proc_col].dropna().astype(str),
+                df_fused[fused_proc_col].dropna().astype(str),
+            ],
+            ignore_index=True,
+        )
+    ).tolist()
+    all_labels = [label for label in all_labels if label]
+    unknown_labels = sorted([label for label in all_labels if label not in process_colors])
+    if unknown_labels:
+        cmap = plt.get_cmap("tab20")
+        for idx, label in enumerate(unknown_labels):
+            process_colors[label] = cmap(idx % cmap.N)
+
+    # Infer a reasonable rectangle width from the time sampling (in matplotlib date units).
+    times = pd.to_datetime(
+        pd.concat(
+            [
+                df_scan[scan_time_col] if not df_scan.empty else pd.Series([], dtype="datetime64[ns]"),
+                df_fused[fused_time_col] if not df_fused.empty else pd.Series([], dtype="datetime64[ns]"),
+            ],
+            ignore_index=True,
+        )
+    )
+    unique_times = pd.to_datetime(pd.unique(times)).sort_values()
+    width_days = 1.0 / (24.0 * 60.0)  # 1 minute default
+    if len(unique_times) >= 2:
+        dt = np.diff(mdates.date2num(unique_times.to_numpy()))
+        dt = dt[np.isfinite(dt) & (dt > 0)]
+        if dt.size:
+            width_days = float(np.median(dt)) * 0.85
+            width_days = max(width_days, 1.0 / (24.0 * 3600.0))  # at least 1 second
+
+    title_fs = kwargs.get("title_fs", 16)
+    label_fs = kwargs.get("label_fs", 15)
+    tick_fs = kwargs.get("tick_fs", 12)
+
+    def _resolve_height_limits_km_from_frames(
+        explicit_limits: tuple[float, float] | None,
+    ) -> tuple[float, float] | None:
+        if explicit_limits is not None:
+            return explicit_limits
+
+        heights_m: list[np.ndarray] = []
+        if not df_scan.empty:
+            if "z_center_m" in df_scan.columns:
+                heights_m.append(pd.to_numeric(df_scan["z_center_m"], errors="coerce").to_numpy(dtype=float))
+            heights_m.append(pd.to_numeric(df_scan[scan_top_col], errors="coerce").to_numpy(dtype=float))
+            heights_m.append(pd.to_numeric(df_scan[scan_bottom_col], errors="coerce").to_numpy(dtype=float))
+        if not df_fused.empty:
+            heights_m.append(pd.to_numeric(df_fused[fused_top_col], errors="coerce").to_numpy(dtype=float))
+            heights_m.append(pd.to_numeric(df_fused[fused_bottom_col], errors="coerce").to_numpy(dtype=float))
+
+        if not heights_m:
+            return None
+        all_vals = np.concatenate(heights_m)
+        finite = all_vals[np.isfinite(all_vals)]
+        if finite.size == 0:
+            return None
+        return float(np.min(finite)) / 1000.0, float(np.max(finite)) / 1000.0
+
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+
+    # Background scan points at layer center.
+    if not df_scan.empty:
+        center_m = 0.5 * (df_scan[scan_top_col].to_numpy(dtype=float) + df_scan[scan_bottom_col].to_numpy(dtype=float))
+        finite = np.isfinite(center_m) & (~pd.isna(df_scan[scan_time_col]).to_numpy())
+        if np.any(finite):
+            for label in sorted(pd.unique(df_scan.loc[finite, scan_proc_col])):
+                mask = finite & (df_scan[scan_proc_col].to_numpy(dtype=str) == str(label))
+                if not np.any(mask):
+                    continue
+                ax.scatter(
+                    df_scan.loc[mask, scan_time_col],
+                    center_m[mask] / 1000.0,
+                    s=10.0,
+                    alpha=float(alpha_scan),
+                    c=[process_colors.get(str(label), "#333333")],
+                    edgecolors="none",
+                )
+
+    # Fused rectangles.
+    if not df_fused.empty:
+        for _, row in df_fused.iterrows():
+            t = row.get(fused_time_col, None)
+            z_top = row.get(fused_top_col, np.nan)
+            z_bottom = row.get(fused_bottom_col, np.nan)
+            label = str(row.get(fused_proc_col, ""))
+            if t is None or not pd.notna(t):
+                continue
+            if not (np.isfinite(z_top) and np.isfinite(z_bottom) and z_top > z_bottom):
+                continue
+
+            t_center = pd.Timestamp(t).round("us").to_pydatetime()
+            x_center = mdates.date2num(t_center)
+            rect = Rectangle(
+                (x_center - 0.5 * width_days, float(z_bottom) / 1000.0),
+                width_days,
+                float(z_top - z_bottom) / 1000.0,
+                facecolor=process_colors.get(label, "#333333"),
+                edgecolor="none",
+                alpha=float(alpha_fused),
+            )
+            ax.add_patch(rect)
+
+    ax.set_xlabel("Time", fontsize=label_fs)
+    ax.set_ylabel("Height (km)", fontsize=label_fs)
+    ax.tick_params(labelsize=tick_fs)
+    ax.grid(True, which="both", linestyle="--", linewidth=0.45, alpha=0.35)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+
+    period_start = scan_df.attrs.get("period_start", fused_df.attrs.get("period_start", None))
+    period_end = scan_df.attrs.get("period_end", fused_df.attrs.get("period_end", None))
+    thickness = scan_df.attrs.get("window_thickness_m", None)
+    step = scan_df.attrs.get("window_step_m", None)
+    min_tau_strength = scan_df.attrs.get("min_tau_strength", None)
+    min_consecutive = fused_df.attrs.get("min_consecutive", None)
+
+    subtitle_parts = []
+    if thickness is not None:
+        subtitle_parts.append(f"window={float(thickness):.0f} m")
+    if step is not None:
+        subtitle_parts.append(f"step={float(step):.0f} m")
+    if min_consecutive is not None:
+        subtitle_parts.append(f"min_consecutive={int(min_consecutive)}")
+    if min_tau_strength is not None:
+        subtitle_parts.append(f"min_tau_strength={float(min_tau_strength):.2f}")
+    subtitle = " | ".join(subtitle_parts)
+
+    title = "Fused Process Quicklook"
+    if period_start and period_end:
+        title = f"{title} | {str(period_start)[0:16].replace('T', ' ')} - {str(period_end)[11:16]}"
+    if subtitle:
+        title = f"{title}\n{subtitle}"
+    ax.set_title(title, fontsize=title_fs, pad=12)
+
+    y_limits = _resolve_height_limits_km_from_frames(kwargs.get("y_limits"))
+    if y_limits is not None:
+        ax.set_ylim(*y_limits)
+
+    # Legend based on fused labels (usually fewer than scan labels).
+    fused_labels = []
+    if not df_fused.empty:
+        fused_labels = [label for label in pd.unique(df_fused[fused_proc_col]) if label]
+    if fused_labels and len(fused_labels) <= 12:
+        handles = [
+            Rectangle((0, 0), 1, 1, facecolor=process_colors.get(str(label), "#333333"), alpha=float(alpha_fused))
+            for label in fused_labels
+        ]
+        ax.legend(
+            handles,
+            [str(label) for label in fused_labels],
+            loc=kwargs.get("legend_loc", "upper left"),
+            fontsize=kwargs.get("legend_fs", 10),
+            ncol=kwargs.get("legend_ncol", 2),
+            frameon=True,
+        )
+
+    filepath: Path | None = None
+    if savefig:
+        outdir = Path(".") if output_dir is None else Path(output_dir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        safe_t0 = str(period_start or "t0").replace(":", "").replace("-", "").replace(" ", "_")
+        safe_t1 = str(period_end or "t1").replace(":", "").replace("-", "").replace(" ", "_")
+        filepath = outdir / f"fused_process_quicklook_{safe_t0}_{safe_t1}.png"
+        fig.savefig(filepath, dpi=int(dpi), bbox_inches="tight")
 
     return fig, filepath
 

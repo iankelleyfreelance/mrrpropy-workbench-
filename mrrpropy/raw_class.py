@@ -28,6 +28,7 @@ import pandas as pd
 import xarray as xr
 from datetime import datetime
 
+from mrrpropy.analysis import process_features as process_feature_analysis
 from mrrpropy.analysis import processes as process_analysis
 from mrrpropy.plotting import _spectra as spectral_plotting
 from mrrpropy.plotting import processes as process_plotting
@@ -36,6 +37,13 @@ from mrrpropy.plotting import raw as raw_plotting
 from mrrpropy.processing import raprompro as raprompro_processing
 
 DatetimeLike = Union[str, np.datetime64, datetime]
+
+
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
 
 plt.rcParams.update(
     {
@@ -50,15 +58,29 @@ plt.rcParams.update(
 
 @dataclass
 class MicrophysicsConfig:
-    """Default thresholds and RGB/hexagram settings for rain-process analysis."""
+    """
+    Default thresholds and RGB/hexagram settings for rain-process analysis.
+
+    Notes
+    -----
+    Scan-mode workflows (sliding vertical windows) use ``window_thickness_m`` and
+    ``window_step_m`` from this configuration by default when explicit arguments
+    are not provided.
+
+    ``window_step_m=None`` means "raw resolution": the scan step is inferred
+    from the native range grid spacing (median of the range-coordinate
+    differences).
+    """
 
     variable_threshold: str = "Ze"
     threshold_value: float = -5.0
+    window_thickness_m: float = 500.0
+    window_step_m: float | None = None  # None means "use raw vertical resolution"
     trend_method: str = "kendall_theilsen"
     tau_zero_tol: float = 0.05
     min_points_trend: int = 10
     min_points_ols: int = 10
-    min_tau_strength: float = 0.10
+    min_tau_strength: float = 0.5
     max_tau_pvalue: float | None = None
     eps_q: float = 0.01
     rgb_q: float = 0.02
@@ -1199,8 +1221,8 @@ class MRRProData:
         period: tuple[datetime, datetime],
         k: int,
         selection_mode: str = "scan",
-        window_thickness_m: float = 1000.0,
-        window_step_m: float = 100.0,
+        window_thickness_m: float | None = None,
+        window_step_m: float | None | _UnsetType = _UNSET,
         z_bottom_m: float | None = None,
         z_top_m: float | None = None,
         layer: tuple[float, float] | None = None,
@@ -1212,7 +1234,7 @@ class MRRProData:
         eps_q: float = 0.01,
         rgb_q: float = 0.02,
         vars_trend: tuple[str, str, str] = ("Dm", "Nw", "LWC"),
-        min_tau_strength: float = 0.10,
+        min_tau_strength: float | None | _UnsetType = _UNSET,
         max_tau_pvalue: float | None = None,
     ) -> xr.Dataset | pd.DataFrame:
         """
@@ -1244,6 +1266,14 @@ class MRRProData:
             returns the analysis dataset containing the trend diagnostics, RGB
             channels, elapsed minutes and the hexagram coordinates used
             downstream for plotting and classification.
+
+        Notes
+        -----
+        In scan mode, window geometry and the tau-strength threshold default to
+        :attr:`micro_cfg` unless overridden by explicit arguments.
+
+        ``window_step_m=None`` means "raw resolution": use the native range grid
+        spacing (median of the range-coordinate differences).
         """
         mode = str(selection_mode).strip().lower()
         if mode not in {"scan", "fixed_layer"}:
@@ -1264,13 +1294,28 @@ class MRRProData:
             mode = "fixed_layer"
 
         if mode == "scan":
+            thickness_m = (
+                float(window_thickness_m)
+                if window_thickness_m is not None
+                else float(self.micro_cfg.window_thickness_m)
+            )
+            step_m = (
+                window_step_m
+                if window_step_m is not _UNSET
+                else self.micro_cfg.window_step_m
+            )
+            tau_strength = (
+                min_tau_strength
+                if min_tau_strength is not _UNSET
+                else self.micro_cfg.min_tau_strength
+            )
             return process_analysis.build_column_process_scan_dataframe(
                 self,
                 period=period,
                 k=k,
-                window_thickness_m=window_thickness_m,
-                window_step_m=window_step_m,
-                min_tau_strength=min_tau_strength,
+                window_thickness_m=thickness_m,
+                window_step_m=step_m,
+                min_tau_strength=tau_strength,
                 ze_th=ze_th,
                 trend_method=trend_method,
                 tau_zero_tol=tau_zero_tol,
@@ -1343,7 +1388,7 @@ class MRRProData:
         analysis: xr.Dataset,
         tol_center: float = 0.05,
         min_strength: float = 0.10,
-        min_tau_strength: float | None = None,
+        min_tau_strength: float | None | _UnsetType = _UNSET,
         max_p_value: float | None = None,
         max_tau_pvalue: float | None = None,
     ) -> xr.Dataset:
@@ -1358,14 +1403,67 @@ class MRRProData:
         is retained as a compatibility fallback for legacy analyses.
         """
 
+        tau_strength = (
+            min_tau_strength
+            if min_tau_strength is not _UNSET
+            else self.micro_cfg.min_tau_strength
+        )
         return process_analysis.classify_rain_process(
             self,
             analysis=analysis,
             tol_center=tol_center,
             min_strength=min_strength,
-            min_tau_strength=min_tau_strength,
+            min_tau_strength=tau_strength,
             max_p_value=max_p_value,
             max_tau_pvalue=max_tau_pvalue,
+        )
+
+    def build_process_features(
+        self,
+        *,
+        ds: xr.Dataset | None = None,
+        mode: str,
+        range_coord: str = "range",
+        window_thickness_m: float | None = None,
+        window_step_m: float | None | _UnsetType = _UNSET,
+        fixed_layer_top_m: float | None = None,
+        fixed_layer_bottom_m: float | None = None,
+        bb_bottom_m: float | xr.DataArray,
+        bb_peak_m: float | xr.DataArray,
+        bb_top_m: float | xr.DataArray,
+        Dm_var: str = "Dm",
+        Nw_var: str = "Nw",
+        LWC_var: str = "LWC",
+        RR_var: str = "RR",
+        spectrum_var: str = "spectrum",
+        velocity_coord: str = "velocity",
+    ) -> xr.Dataset:
+        """
+        Build Phase A `process_features` from a dataset.
+
+        In scan mode, ``window_thickness_m`` and ``window_step_m`` default to
+        :attr:`micro_cfg` when not explicitly provided. ``window_step_m=None``
+        means "raw resolution" (native range-grid spacing).
+        """
+        ds_in = ds if ds is not None else (self.raprompro if self.raprompro is not None else self.ds)
+        return process_feature_analysis.build_process_features(
+            ds_in,
+            mode=mode,
+            range_coord=range_coord,
+            window_thickness_m=window_thickness_m,
+            window_step_m=window_step_m,
+            fixed_layer_top_m=fixed_layer_top_m,
+            fixed_layer_bottom_m=fixed_layer_bottom_m,
+            bb_bottom_m=bb_bottom_m,
+            bb_peak_m=bb_peak_m,
+            bb_top_m=bb_top_m,
+            micro_cfg=self.micro_cfg,
+            Dm_var=Dm_var,
+            Nw_var=Nw_var,
+            LWC_var=LWC_var,
+            RR_var=RR_var,
+            spectrum_var=spectrum_var,
+            velocity_coord=velocity_coord,
         )
 
     def classify_process_from_features(
@@ -1374,7 +1472,7 @@ class MRRProData:
         process_features: xr.Dataset,
         refiners: list[Any] | None = None,
         min_strength: float = 0.10,
-        min_tau_strength: float | None = None,
+        min_tau_strength: float | None | _UnsetType = _UNSET,
         max_p_value: float | None = None,
         max_tau_pvalue: float | None = None,
     ) -> xr.Dataset:
@@ -1384,11 +1482,16 @@ class MRRProData:
         This is the recommended entry point for the new two-stage pipeline:
         Phase A builds `process_features`, Phase B classifies them.
         """
+        tau_strength = (
+            min_tau_strength
+            if min_tau_strength is not _UNSET
+            else self.micro_cfg.min_tau_strength
+        )
         return process_analysis.classify_process_from_features(
             process_features,
             refiners=refiners,
             min_strength=min_strength,
-            min_tau_strength=min_tau_strength,
+            min_tau_strength=tau_strength,
             max_p_value=max_p_value,
             max_tau_pvalue=max_tau_pvalue,
         )
@@ -1476,9 +1579,9 @@ class MRRProData:
         *,
         period: tuple[datetime, datetime],
         k: int,
-        window_thickness_m: float = 1000.0,
-        window_step_m: float = 100.0,
-        min_tau_strength: float = 0.10,
+        window_thickness_m: float | None = None,
+        window_step_m: float | None | _UnsetType = _UNSET,
+        min_tau_strength: float | None | _UnsetType = _UNSET,
         ze_th: float = -5.0,
         trend_method: str = "kendall_theilsen",
         tau_zero_tol: float = 0.05,
@@ -1492,16 +1595,36 @@ class MRRProData:
         """
         Scan the whole column with a sliding vertical window.
 
+        By default, ``window_thickness_m``, ``window_step_m`` and
+        ``min_tau_strength`` are taken from :attr:`micro_cfg` unless overridden
+        by explicit arguments. ``window_step_m=None`` means "raw resolution"
+        (native range-grid spacing).
+
         The output dataframe contains one row per ``time × window`` and is the
         recommended input for :meth:`detect_column_process_episodes`.
         """
+        thickness_m = (
+            float(window_thickness_m)
+            if window_thickness_m is not None
+            else float(self.micro_cfg.window_thickness_m)
+        )
+        step_m = (
+            window_step_m
+            if window_step_m is not _UNSET
+            else self.micro_cfg.window_step_m
+        )
+        tau_strength = (
+            min_tau_strength
+            if min_tau_strength is not _UNSET
+            else self.micro_cfg.min_tau_strength
+        )
         return process_analysis.build_column_process_scan_dataframe(
             self,
             period=period,
             k=k,
-            window_thickness_m=window_thickness_m,
-            window_step_m=window_step_m,
-            min_tau_strength=min_tau_strength,
+            window_thickness_m=thickness_m,
+            window_step_m=step_m,
+            min_tau_strength=tau_strength,
             ze_th=ze_th,
             trend_method=trend_method,
             tau_zero_tol=tau_zero_tol,

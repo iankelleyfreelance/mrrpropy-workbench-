@@ -6,23 +6,14 @@ import matplotlib.pyplot as plt
 import pytest
 from matplotlib.figure import Figure
 import pandas as pd
-import xarray as xr
-
 
 matplotlib.use("Agg")
 
 pytestmark = [pytest.mark.slow, pytest.mark.plot, pytest.mark.integration]
 
-WINDOW_THICKNESS_M = 600.0
-WINDOW_STEP_M = 200.0
+WINDOW_THICKNESS_M = 500.0
+WINDOW_STEP_M = None  # Use the raw window step from the scan, which is typically around 100 m
 MIN_TAU_STRENGTH = 0.5
-
-class _SyntheticPlotSubject:
-    def __init__(self, ds: xr.Dataset):
-        self.raprompro = ds
-
-    def _is_processed(self):
-        return True
 
 
 @pytest.fixture(scope="session")
@@ -67,8 +58,7 @@ def test_plot_column_process_scan(raprompro_subset_10min_loaded_mrr, artifact_di
     )
 
     fig, path = raprompro_subset_10min_loaded_mrr.plot_column_process_scan(
-        scan_df=scan_df,
-        processes=['breakup', 'growth_depletion', 'growth_depletion_loss', 'growth_depletion_gain', 'activation', 'evaporation', 'growth'],
+        scan_df=scan_df,        
         savefig=True,
         output_dir=output_dir,
         figsize=(10, 6),

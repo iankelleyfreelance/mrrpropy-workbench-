@@ -6,18 +6,26 @@ import numpy as np
 import xarray as xr
 
 
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
+
+
 def build_process_features(
     ds: xr.Dataset,
     *,
     mode: Literal["fixed_layer", "scan"],
     range_coord: str = "range",
     window_thickness_m: float | None = None,
-    window_step_m: float | None = None,
+    window_step_m: float | None | _UnsetType = _UNSET,
     fixed_layer_top_m: float | None = None,
     fixed_layer_bottom_m: float | None = None,
     bb_bottom_m: float | xr.DataArray,
     bb_peak_m: float | xr.DataArray,
     bb_top_m: float | xr.DataArray,
+    micro_cfg: object | None = None,
     Dm_var: str = "Dm",
     Nw_var: str = "Nw",
     LWC_var: str = "LWC",
@@ -35,6 +43,15 @@ def build_process_features(
     - fixed_layer: uses explicit (fixed_layer_top_m, fixed_layer_bottom_m) and returns dims (time)
     - scan: generates windows using (window_thickness_m, window_step_m) and returns dims (time, layer)
       where coord `layer` is the physical layer-center height (m).
+
+    Scan defaults
+    -------------
+    In scan mode, if ``window_thickness_m`` and/or ``window_step_m`` are not
+    provided, the function falls back to the values stored in the caller's
+    ``micro_cfg`` (typically :class:`mrrpropy.raw_class.MicrophysicsConfig`).
+
+    ``window_step_m=None`` means "raw resolution": infer the scan step from the
+    native range grid spacing (median of the range-coordinate differences).
     """
     mode = str(mode).strip().lower()
     if mode not in {"fixed_layer", "scan"}:
@@ -43,6 +60,21 @@ def build_process_features(
         raise KeyError("ds must contain coord 'time'.")
     if range_coord not in ds.coords:
         raise KeyError(f"ds must contain coord '{range_coord}'.")
+
+    def _infer_native_step_m() -> float:
+        values = np.asarray(ds[range_coord].values, dtype=float)
+        diffs = np.abs(np.diff(values))
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0.0)]
+        if diffs.size == 0:
+            raise ValueError(
+                f"Cannot infer raw vertical resolution from ds['{range_coord}']."
+            )
+        step_m = float(np.median(diffs))
+        if not (np.isfinite(step_m) and step_m > 0.0):
+            raise ValueError(
+                f"Cannot infer a positive scan step from ds['{range_coord}']."
+            )
+        return step_m
 
     if mode == "fixed_layer":
         if fixed_layer_top_m is None or fixed_layer_bottom_m is None:
@@ -56,10 +88,21 @@ def build_process_features(
         z_bottom = xr.DataArray(z_bottom_vals)
         z_center = xr.DataArray(0.5 * (z_top_vals + z_bottom_vals))
     else:
-        if window_thickness_m is None or window_step_m is None:
-            raise ValueError("scan mode requires window_thickness_m and window_step_m.")
+        if window_thickness_m is None and micro_cfg is not None:
+            cfg_thickness = getattr(micro_cfg, "window_thickness_m", None)
+            if cfg_thickness is not None:
+                window_thickness_m = float(cfg_thickness)
+
+        if window_step_m is _UNSET:
+            window_step_m = getattr(micro_cfg, "window_step_m", None) if micro_cfg is not None else None
+
+        if window_thickness_m is None:
+            raise ValueError("scan mode requires window_thickness_m.")
         thickness = float(window_thickness_m)
-        step = float(window_step_m)
+        if window_step_m is None:
+            step = _infer_native_step_m()
+        else:
+            step = float(window_step_m)
         if not (np.isfinite(thickness) and thickness > 0.0):
             raise ValueError("scan mode requires window_thickness_m > 0.")
         if not (np.isfinite(step) and step > 0.0):

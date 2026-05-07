@@ -554,7 +554,7 @@ def _analyze_one_file(
                 period=period,
                 layer=layer,
                 k=k,
-                min_tau_strength=0.10,
+                min_tau_strength=mrr.micro_cfg.min_tau_strength,
                 output_dir=rain_layer_dir,
                 dpi=dpi,
             )

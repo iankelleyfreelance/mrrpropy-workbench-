@@ -27,6 +27,14 @@ PROCESS_SIGNATURES = _PROCESS_SIGNATURES
 PROCESS_CODES = _PROCESS_CODES
 PROCESS_MARKERS = _PROCESS_MARKERS
 
+
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
+
+
 class SupportsRainAnalysis(Protocol):
     path: str | Path
     raprompro: xr.Dataset | None
@@ -1517,9 +1525,9 @@ def build_column_process_scan_dataframe(
     *,
     period: tuple[datetime, datetime],
     k: int,
-    window_thickness_m: float = 1000.0,
-    window_step_m: float = 100.0,
-    min_tau_strength: float = 0.10,
+    window_thickness_m: float | None = None,
+    window_step_m: float | None | _UnsetType = _UNSET,
+    min_tau_strength: float | None | _UnsetType = _UNSET,
     ze_th: float = -5.0,
     trend_method: str = "kendall_theilsen",
     tau_zero_tol: float = 0.05,
@@ -1537,15 +1545,52 @@ def build_column_process_scan_dataframe(
     classification pipeline, then exports a per-sample dataframe. The output is
     therefore indexed by both time and layer window, and is intended as the
     input for consecutive-profile episode detection.
+
+    When the caller does not provide ``window_thickness_m``, ``window_step_m``
+    or ``min_tau_strength``, and ``subject`` exposes a ``micro_cfg`` attribute,
+    the corresponding values are taken from that configuration.
+
+    ``window_step_m=None`` means "raw resolution": infer the scan step from the
+    native range-grid spacing (median of the range-coordinate differences).
     """
     ds = _resolve_processed_dataset(subject)
     if period[0] >= period[1]:
         raise ValueError("period must be increasing (start, end).")
 
+    micro_cfg = getattr(subject, "micro_cfg", None)
+
+    thickness_m = (
+        float(window_thickness_m)
+        if window_thickness_m is not None
+        else float(getattr(micro_cfg, "window_thickness_m", 1000.0))
+    )
+
+    step_param = (
+        window_step_m
+        if window_step_m is not _UNSET
+        else getattr(micro_cfg, "window_step_m", 100.0)
+    )
+
+    if step_param is None:
+        values = np.asarray(ds["range"].values, dtype=float)
+        diffs = np.abs(np.diff(values))
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0.0)]
+        if diffs.size == 0:
+            raise ValueError("Cannot infer raw vertical resolution from ds['range'].")
+        step_m = float(np.median(diffs))
+    else:
+        step_m = float(step_param)
+
+    tau_strength = (
+        min_tau_strength
+        if min_tau_strength is not _UNSET
+        else getattr(micro_cfg, "min_tau_strength", 0.10)
+    )
+
     windows = _build_sliding_layer_windows(
         ds["range"].values,
-        window_thickness_m=float(window_thickness_m),
-        window_step_m=float(window_step_m),
+        window_thickness_m=thickness_m,
+        window_step_m=step_m,
     )
     if not windows:
         return pd.DataFrame()
@@ -1570,7 +1615,7 @@ def build_column_process_scan_dataframe(
         classified = classify_rain_process(
             subject,
             analysis=analysis,
-            min_tau_strength=min_tau_strength,
+            min_tau_strength=None if tau_strength is None else float(tau_strength),
             max_tau_pvalue=max_tau_pvalue,
         )
         frame = build_process_dynamics_dataframe(
@@ -1585,8 +1630,8 @@ def build_column_process_scan_dataframe(
         frame["z_bottom_m"] = float(z_min_m)
         frame["z_top_m"] = float(z_max_m)
         frame["z_center_m"] = float(0.5 * (z_min_m + z_max_m))
-        frame["window_thickness_m"] = float(window_thickness_m)
-        frame["window_step_m"] = float(window_step_m)
+        frame["window_thickness_m"] = float(thickness_m)
+        frame["window_step_m"] = float(step_m)
         frame["trend_method"] = str(analysis.attrs.get("trend_method", trend_method))
         frame["selection_mode"] = "scan"
         frames.append(frame)
@@ -1595,15 +1640,339 @@ def build_column_process_scan_dataframe(
     scan_df.attrs = {
         "period_start": str(np.datetime_as_string(np.datetime64(period[0]), unit="s")),
         "period_end": str(np.datetime_as_string(np.datetime64(period[1]), unit="s")),
-        "window_thickness_m": float(window_thickness_m),
-        "window_step_m": float(window_step_m),
-        "min_tau_strength": float(min_tau_strength),
+        "window_thickness_m": float(thickness_m),
+        "window_step_m": float(step_m),
+        "min_tau_strength": None if tau_strength is None else float(tau_strength),
         "trend_method": str(trend_method),
         "tau_zero_tol": float(tau_zero_tol),
         "k": int(k),
         "selection_mode": "scan",
     }
     return scan_df
+
+
+def build_fused_column_process_dataframe(
+    subject: SupportsRainAnalysis,
+    scan_df: pd.DataFrame,
+    *,
+    min_consecutive: int = 3,
+    allowed_processes: tuple[str, ...] | None = None,
+    exclude_processes: tuple[str, ...] = ("unknown", "steady_or_weak"),
+    process_col: str = "proc_label",
+    time_col: str = "time",
+    z_top_col: str = "z_top",
+    z_bottom_col: str = "z_bottom",
+    variable_threshold: str | None = None,
+    threshold_value: float | None = None,
+    trend_method: str | None = None,
+    tau_zero_tol: float | None = None,
+    min_points_trend: int | None = None,
+    vars_trend: tuple[str, str, str] | None = None,
+) -> pd.DataFrame:
+    """
+    Exploratory Option B: fuse vertical scan detections into consolidated layers.
+
+    The input ``scan_df`` is expected to be the dataframe returned by
+    :func:`build_column_process_scan_dataframe`. For each time step, the
+    function searches for *vertically adjacent* runs of the same process label,
+    fuses each run into one vertical layer, recomputes the microphysical trends
+    on the fused layer using ``subject.raprompro``, and reclassifies the fused
+    layer with the standard process classifier.
+
+    Grouping logic (per time step)
+    ------------------------------
+    - Rows are sorted vertically (top-to-bottom) so adjacent rows represent
+      adjacent scan windows in height.
+    - A run is a *strictly adjacent* sequence of rows with the same process
+      label. Labels separated by other labels are never grouped.
+    - By default, labels in ``exclude_processes`` are ignored and also break
+      adjacency.
+    - If ``allowed_processes`` is provided, only those labels are considered
+      (other labels break adjacency).
+    - Only runs with ``len(run) >= min_consecutive`` are fused.
+
+    Fused-layer recomputation
+    -------------------------
+    Trends are recomputed on the actual fused layer bounds, not inferred from
+    the individual scan-window rows. For each fused event, the trend is
+    recomputed on a single time step by subsetting ``subject.raprompro`` to the
+    event time.
+
+    Any argument left as ``None`` falls back to ``subject.micro_cfg``:
+    ``variable_threshold``, ``threshold_value``, ``trend_method``,
+    ``tau_zero_tol``, ``min_points_trend``, and ``vars_trend``.
+
+    Robustness
+    ----------
+    If recomputation fails for a given fused event, the function keeps that
+    event and populates recomputed fields with NaNs, while recording a short
+    error message in ``recompute_error``.
+    """
+    if not isinstance(scan_df, pd.DataFrame):
+        raise TypeError("scan_df must be a pandas DataFrame.")
+    if scan_df.empty:
+        return pd.DataFrame()
+    if min_consecutive <= 0:
+        raise ValueError("min_consecutive must be positive.")
+
+    ds = getattr(subject, "raprompro", None)
+    if ds is None:
+        raise RuntimeError("subject.raprompro is missing; load the processed dataset first.")
+
+    micro_cfg = getattr(subject, "micro_cfg", None)
+    if micro_cfg is None:
+        raise RuntimeError("subject.micro_cfg is missing; cannot resolve default parameters.")
+
+    resolved_variable_threshold = (
+        str(variable_threshold) if variable_threshold is not None else str(micro_cfg.variable_threshold)
+    )
+    resolved_threshold_value = (
+        float(threshold_value) if threshold_value is not None else float(micro_cfg.threshold_value)
+    )
+    resolved_trend_method = (
+        str(trend_method) if trend_method is not None else str(micro_cfg.trend_method)
+    )
+    resolved_tau_zero_tol = (
+        float(tau_zero_tol) if tau_zero_tol is not None else float(micro_cfg.tau_zero_tol)
+    )
+    resolved_min_points_trend = (
+        int(min_points_trend) if min_points_trend is not None else int(micro_cfg.min_points_trend)
+    )
+    resolved_vars_trend = (
+        tuple(vars_trend) if vars_trend is not None else tuple(micro_cfg.vars_trend)
+    )
+
+    exclude_set = set(exclude_processes)
+    allowed_set = set(allowed_processes) if allowed_processes is not None else None
+
+    def _resolve_column(df: pd.DataFrame, requested: str, alternatives: tuple[str, ...]) -> str:
+        if requested in df.columns:
+            return requested
+        for alt in alternatives:
+            if alt in df.columns:
+                return alt
+        raise KeyError(
+            f"scan_df is missing column {requested!r}. Available columns: {list(df.columns)!r}"
+        )
+
+    # `build_column_process_scan_dataframe` uses z_bottom_m/z_top_m; keep the public
+    # signature generic, but accept the package-native names transparently.
+    resolved_time_col = _resolve_column(scan_df, time_col, ("time",))
+    resolved_process_col = _resolve_column(scan_df, process_col, ("proc_label",))
+    resolved_z_top_col = _resolve_column(scan_df, z_top_col, ("z_top_m", "z_max_m"))
+    resolved_z_bottom_col = _resolve_column(scan_df, z_bottom_col, ("z_bottom_m", "z_min_m"))
+
+    has_window_id = "window_id" in scan_df.columns
+
+    def _iter_vertical_runs(df_t: pd.DataFrame) -> list[dict[str, object]]:
+        if df_t.empty:
+            return []
+
+        df_sorted = df_t.copy()
+        if has_window_id:
+            # In the scan workflow, window_id increases with height.
+            df_sorted = df_sorted.sort_values("window_id", ascending=False)
+        else:
+            # Generic fallback: sort by top height (highest first), then bottom.
+            df_sorted = df_sorted.sort_values(
+                [resolved_z_top_col, resolved_z_bottom_col],
+                ascending=[False, False],
+            )
+
+        labels = df_sorted[resolved_process_col].astype(str).to_numpy()
+        z_top_vals = pd.to_numeric(df_sorted[resolved_z_top_col], errors="coerce").to_numpy(dtype=float)
+        z_bottom_vals = pd.to_numeric(df_sorted[resolved_z_bottom_col], errors="coerce").to_numpy(dtype=float)
+
+        runs: list[dict[str, object]] = []
+
+        def _eligible(label: str) -> bool:
+            if label in exclude_set:
+                return False
+            if allowed_set is not None and label not in allowed_set:
+                return False
+            return True
+
+        active_label: str | None = None
+        start: int | None = None
+
+        def _close(end: int) -> None:
+            nonlocal active_label, start
+            if active_label is None or start is None:
+                return
+            run_len = int(end - start)
+            if run_len >= int(min_consecutive):
+                top = float(np.nanmax(z_top_vals[start:end]))
+                bottom = float(np.nanmin(z_bottom_vals[start:end]))
+                if np.isfinite(top) and np.isfinite(bottom) and top > bottom:
+                    run: dict[str, object] = {
+                        "run_process_label": str(active_label),
+                        "z_top_fused": top,
+                        "z_bottom_fused": bottom,
+                        "thickness_fused": float(top - bottom),
+                        "n_windows_merged": int(run_len),
+                    }
+                    if has_window_id:
+                        window_ids = pd.to_numeric(
+                            df_sorted["window_id"].iloc[start:end],
+                            errors="coerce",
+                        ).to_numpy(dtype=float)
+                        finite_ids = window_ids[np.isfinite(window_ids)]
+                        if finite_ids.size:
+                            run["window_id_top"] = int(np.max(finite_ids))
+                            run["window_id_bottom"] = int(np.min(finite_ids))
+                    runs.append(run)
+            active_label = None
+            start = None
+
+        for idx, label in enumerate(labels):
+            label_str = str(label)
+            if not _eligible(label_str):
+                _close(idx)
+                continue
+
+            if active_label is None:
+                active_label = label_str
+                start = idx
+                continue
+
+            if label_str != active_label:
+                _close(idx)
+                active_label = label_str
+                start = idx
+
+        _close(labels.size)
+
+        return runs
+
+    class _TempSubject:
+        def __init__(self, template: SupportsRainAnalysis, ds_one_time: xr.Dataset) -> None:
+            self.path = getattr(template, "path", "")
+            self.raprompro = ds_one_time
+
+        def _is_processed(self) -> bool:
+            return True
+
+    def _select_time(ds_in: xr.Dataset, time_value: pd.Timestamp) -> xr.Dataset:
+        # Preserve a length-1 'time' dimension so downstream code remains consistent.
+        try:
+            return ds_in.sel(time=[np.datetime64(time_value)])
+        except Exception:
+            return ds_in.sel(time=[np.datetime64(time_value)], method="nearest")
+
+    def _recompute_one_event(
+        *,
+        time_value: pd.Timestamp,
+        z_bottom_m: float,
+        z_top_m: float,
+    ) -> pd.DataFrame:
+        ds_one_time = _select_time(ds, time_value)
+        temp_subject = _TempSubject(subject, ds_one_time)
+
+        trends = compute_layer_trend(
+            temp_subject,
+            z_bottom_m=float(z_bottom_m),
+            z_top_m=float(z_top_m),
+            variable_threshold=resolved_variable_threshold,
+            threshold_value=resolved_threshold_value,
+            vars=resolved_vars_trend,
+            trend_method=resolved_trend_method,
+            tau_zero_tol=resolved_tau_zero_tol,
+            min_points_trend=int(resolved_min_points_trend),
+            min_points_ols=int(resolved_min_points_trend),
+            q=float(getattr(micro_cfg, "eps_q", 0.01)),
+        )
+
+        classified = classify_rain_process(
+            subject,
+            analysis=trends,
+            min_tau_strength=float(micro_cfg.min_tau_strength),
+            max_tau_pvalue=getattr(micro_cfg, "max_tau_pvalue", None),
+        )
+
+        df_one = build_process_dynamics_dataframe(
+            subject,
+            analysis=trends,
+            classified=classified,
+            variables=tuple(resolved_vars_trend),
+        ).reset_index()
+
+        return df_one
+
+    scan_times = pd.to_datetime(scan_df[resolved_time_col])
+    out_rows: list[pd.DataFrame] = []
+
+    for time_value, df_t in scan_df.assign(**{resolved_time_col: scan_times}).groupby(
+        resolved_time_col, sort=True
+    ):
+        time_value = pd.Timestamp(time_value)
+        runs = _iter_vertical_runs(df_t)
+        if not runs:
+            continue
+
+        for run in runs:
+            z_top_fused = float(run["z_top_fused"])
+            z_bottom_fused = float(run["z_bottom_fused"])
+            base_row = {
+                "time": time_value,
+                "run_process_label": run["run_process_label"],
+                "z_top_fused": z_top_fused,
+                "z_bottom_fused": z_bottom_fused,
+                "thickness_fused": float(run["thickness_fused"]),
+                "z_center_fused": float(0.5 * (z_top_fused + z_bottom_fused)),
+                "n_windows_merged": int(run["n_windows_merged"]),
+                "recompute_error": None,
+            }
+            for extra_key in ("window_id_top", "window_id_bottom"):
+                if extra_key in run:
+                    base_row[extra_key] = run[extra_key]
+
+            try:
+                df_one = _recompute_one_event(
+                    time_value=time_value,
+                    z_bottom_m=z_bottom_fused,
+                    z_top_m=z_top_fused,
+                )
+
+                # Enforce a single-row output per fused event.
+                if df_one.empty:
+                    raise RuntimeError("Recomputation returned an empty dataframe.")
+                fused_row = df_one.iloc[0].to_dict()
+                time_selected = fused_row.get("time", None)
+                fused_row.update(base_row)
+                fused_row["time_selected"] = time_selected
+
+                # Rename for clarity: keep the recomputed label separate from the run label.
+                if "proc_label" in fused_row:
+                    fused_row["proc_label_fused"] = fused_row.pop("proc_label")
+                if "proc_strength" in fused_row:
+                    fused_row["proc_strength_fused"] = fused_row.pop("proc_strength")
+
+                out_rows.append(pd.DataFrame([fused_row]))
+            except Exception as exc:  # pragma: no cover (depends on data quality)
+                failed = dict(base_row)
+                failed["time_selected"] = None
+                failed["proc_label_fused"] = np.nan
+                failed["proc_strength_fused"] = np.nan
+                failed["recompute_error"] = str(exc)[:200]
+                out_rows.append(pd.DataFrame([failed]))
+
+    if not out_rows:
+        return pd.DataFrame()
+
+    out = pd.concat(out_rows, ignore_index=True)
+    out.attrs = dict(getattr(scan_df, "attrs", {}))
+    out.attrs["selection_mode"] = "scan_fused_option_b"
+    out.attrs["min_consecutive"] = int(min_consecutive)
+    out.attrs["excluded_processes"] = tuple(exclude_processes)
+    out.attrs["allowed_processes"] = tuple(allowed_processes) if allowed_processes is not None else None
+    out.attrs["variable_threshold"] = resolved_variable_threshold
+    out.attrs["threshold_value"] = float(resolved_threshold_value)
+    out.attrs["trend_method"] = resolved_trend_method
+    out.attrs["tau_zero_tol"] = float(resolved_tau_zero_tol)
+    out.attrs["min_points_trend"] = int(resolved_min_points_trend)
+    out.attrs["vars_trend"] = tuple(resolved_vars_trend)
+    out.attrs["min_tau_strength"] = float(micro_cfg.min_tau_strength)
+    return out
 
 
 def detect_column_process_episodes(
