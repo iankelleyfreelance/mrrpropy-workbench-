@@ -1201,7 +1201,7 @@ def plot_fused_process_quicklook(
     if scan_df.empty and fused_df.empty:
         raise ValueError("scan_df and fused_df are both empty.")
 
-    process_colors = {
+    process_colors: dict[str, Any] = {
         "breakup": "#12af54",
         "growth_depletion": "#1b9e77",
         "growth_depletion_gain": "#f808d0",

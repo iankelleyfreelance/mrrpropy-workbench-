@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 import xarray as xr
@@ -12,11 +12,13 @@ class _UnsetType:
 
 _UNSET = _UnsetType()
 
+ProcessFeatureMode = Literal["fixed_layer", "scan"]
+
 
 def build_process_features(
     ds: xr.Dataset,
     *,
-    mode: Literal["fixed_layer", "scan"],
+    mode: ProcessFeatureMode,
     range_coord: str = "range",
     window_thickness_m: float | None = None,
     window_step_m: float | None | _UnsetType = _UNSET,
@@ -53,9 +55,10 @@ def build_process_features(
     ``window_step_m=None`` means "raw resolution": infer the scan step from the
     native range grid spacing (median of the range-coordinate differences).
     """
-    mode = str(mode).strip().lower()
-    if mode not in {"fixed_layer", "scan"}:
+    mode_value = str(mode).strip().lower()
+    if mode_value not in {"fixed_layer", "scan"}:
         raise ValueError("mode must be 'fixed_layer' or 'scan'.")
+    mode = cast(ProcessFeatureMode, mode_value)
     if "time" not in ds.coords:
         raise KeyError("ds must contain coord 'time'.")
     if range_coord not in ds.coords:
@@ -93,16 +96,21 @@ def build_process_features(
             if cfg_thickness is not None:
                 window_thickness_m = float(cfg_thickness)
 
-        if window_step_m is _UNSET:
-            window_step_m = getattr(micro_cfg, "window_step_m", None) if micro_cfg is not None else None
+        step_param = (
+            getattr(micro_cfg, "window_step_m", None)
+            if window_step_m is _UNSET
+            else window_step_m
+        )
 
         if window_thickness_m is None:
             raise ValueError("scan mode requires window_thickness_m.")
         thickness = float(window_thickness_m)
-        if window_step_m is None:
+        if step_param is None:
             step = _infer_native_step_m()
+        elif isinstance(step_param, _UnsetType):
+            raise RuntimeError("Internal error: unresolved window_step_m.")
         else:
-            step = float(window_step_m)
+            step = float(step_param)
         if not (np.isfinite(thickness) and thickness > 0.0):
             raise ValueError("scan mode requires window_thickness_m > 0.")
         if not (np.isfinite(step) and step > 0.0):
@@ -225,7 +233,7 @@ def _spectral_moments_1d(
 def get_spectral_features(
     ds: xr.Dataset,
     *,
-    mode: Literal["fixed_layer", "scan"],
+    mode: ProcessFeatureMode,
     z_top: xr.DataArray,
     z_bottom: xr.DataArray,
     z_center: xr.DataArray,
@@ -252,9 +260,10 @@ def get_spectral_features(
     if velocity_coord not in ds.coords:
         raise KeyError(f"ds must contain coord '{velocity_coord}'.")
 
-    mode = str(mode).strip().lower()
-    if mode not in {"fixed_layer", "scan"}:
+    mode_value = str(mode).strip().lower()
+    if mode_value not in {"fixed_layer", "scan"}:
         raise ValueError("mode must be 'fixed_layer' or 'scan'.")
+    mode = cast(ProcessFeatureMode, mode_value)
 
     spectrum = ds[spectrum_var]
     if spectrum.ndim != 3 or spectrum.dims[0] != "time" or spectrum.dims[1] != range_coord:
@@ -266,6 +275,7 @@ def get_spectral_features(
             f"ds['{spectrum_var}'] must have velocity dimension '{velocity_coord}'."
         )
 
+    out_dims: tuple[str, ...]
     if mode == "fixed_layer":
         if z_top.dims or z_bottom.dims or z_center.dims:
             raise ValueError("fixed_layer mode requires scalar z_top/z_bottom/z_center.")
@@ -409,7 +419,7 @@ def get_spectral_features(
 def get_context(
     ds: xr.Dataset,
     *,
-    mode: Literal["fixed_layer", "scan"],
+    mode: ProcessFeatureMode,
     z_top: xr.DataArray,
     z_bottom: xr.DataArray,
     z_center: xr.DataArray,
@@ -436,10 +446,12 @@ def get_context(
     if RR_var not in ds:
         raise KeyError(f"ds must contain variable '{RR_var}'.")
 
-    mode = str(mode).strip().lower()
-    if mode not in {"fixed_layer", "scan"}:
+    mode_value = str(mode).strip().lower()
+    if mode_value not in {"fixed_layer", "scan"}:
         raise ValueError("mode must be 'fixed_layer' or 'scan'.")
+    mode = cast(ProcessFeatureMode, mode_value)
 
+    out_dims: tuple[str, ...]
     if mode == "fixed_layer":
         if z_top.dims or z_bottom.dims or z_center.dims:
             raise ValueError("fixed_layer mode requires scalar z_top/z_bottom/z_center.")
@@ -610,7 +622,7 @@ def _sign_char(sign: int | float) -> str:
 def get_microphysical_features(
     ds: xr.Dataset,
     *,
-    mode: Literal["fixed_layer", "scan"],
+    mode: ProcessFeatureMode,
     z_top: xr.DataArray,
     z_bottom: xr.DataArray,
     z_center: xr.DataArray,
@@ -634,10 +646,12 @@ def get_microphysical_features(
         if name not in ds:
             raise KeyError(f"ds must contain variable '{name}'.")
 
-    mode = str(mode).strip().lower()
-    if mode not in {"fixed_layer", "scan"}:
+    mode_value = str(mode).strip().lower()
+    if mode_value not in {"fixed_layer", "scan"}:
         raise ValueError("mode must be 'fixed_layer' or 'scan'.")
+    mode = cast(ProcessFeatureMode, mode_value)
 
+    out_dims: tuple[str, ...]
     if mode == "fixed_layer":
         if z_top.dims or z_bottom.dims or z_center.dims:
             raise ValueError("fixed_layer mode requires scalar z_top/z_bottom/z_center.")

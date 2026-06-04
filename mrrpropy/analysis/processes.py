@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 import warnings
 
 import numpy as np
@@ -33,6 +33,18 @@ class _UnsetType:
 
 
 _UNSET = _UnsetType()
+
+
+def _float_from_dynamic(value: object, *, name: str) -> float:
+    if isinstance(value, _UnsetType):
+        raise ValueError(f"{name} is unset.")
+    return float(cast(Any, value))
+
+
+def _int_from_dynamic(value: object, *, name: str) -> int:
+    if isinstance(value, _UnsetType):
+        raise ValueError(f"{name} is unset.")
+    return int(cast(Any, value))
 
 
 class SupportsRainAnalysis(Protocol):
@@ -1008,7 +1020,7 @@ def _classify_from_microphysical_trends(
                 raise KeyError(f"Missing required field '{key}' for classification.")
 
     strength_ref = ds[f"trend_strength_{variables[0]}"]
-    sample_dims = tuple(strength_ref.dims)
+    sample_dims = tuple(str(dim) for dim in strength_ref.dims)
 
     p_data = {
         variable_name: ds[f"trend_p_{variable_name}"].values.astype(float)
@@ -1116,7 +1128,7 @@ def classify_process_from_features(
     )
 
     # Build a minimal classification dataset without RGB/hexagram attachments.
-    sample_dims = tuple(core["proc_label"].dims)
+    sample_dims = tuple(str(dim) for dim in core["proc_label"].dims)
     out = xr.Dataset(coords=_coords_for_sample_dims(process_features, sample_dims))
     for name in ("z_top", "z_bottom", "z_center"):
         if name in process_features.coords:
@@ -1579,7 +1591,7 @@ def build_column_process_scan_dataframe(
             raise ValueError("Cannot infer raw vertical resolution from ds['range'].")
         step_m = float(np.median(diffs))
     else:
-        step_m = float(step_param)
+        step_m = _float_from_dynamic(step_param, name="window_step_m")
 
     tau_strength = (
         min_tau_strength
@@ -1615,7 +1627,11 @@ def build_column_process_scan_dataframe(
         classified = classify_rain_process(
             subject,
             analysis=analysis,
-            min_tau_strength=None if tau_strength is None else float(tau_strength),
+            min_tau_strength=(
+                None
+                if tau_strength is None
+                else _float_from_dynamic(tau_strength, name="min_tau_strength")
+            ),
             max_tau_pvalue=max_tau_pvalue,
         )
         frame = build_process_dynamics_dataframe(
@@ -1642,7 +1658,11 @@ def build_column_process_scan_dataframe(
         "period_end": str(np.datetime_as_string(np.datetime64(period[1]), unit="s")),
         "window_thickness_m": float(thickness_m),
         "window_step_m": float(step_m),
-        "min_tau_strength": None if tau_strength is None else float(tau_strength),
+        "min_tau_strength": (
+            None
+            if tau_strength is None
+            else _float_from_dynamic(tau_strength, name="min_tau_strength")
+        ),
         "trend_method": str(trend_method),
         "tau_zero_tol": float(tau_zero_tol),
         "k": int(k),
@@ -1738,8 +1758,14 @@ def build_fused_column_process_dataframe(
     resolved_min_points_trend = (
         int(min_points_trend) if min_points_trend is not None else int(micro_cfg.min_points_trend)
     )
-    resolved_vars_trend = (
+    resolved_vars_trend_raw = (
         tuple(vars_trend) if vars_trend is not None else tuple(micro_cfg.vars_trend)
+    )
+    if len(resolved_vars_trend_raw) != 3:
+        raise ValueError("vars_trend must contain exactly three variable names.")
+    resolved_vars_trend = cast(
+        tuple[str, str, str],
+        tuple(str(variable) for variable in resolved_vars_trend_raw),
     )
 
     exclude_set = set(exclude_processes)
@@ -1845,6 +1871,9 @@ def build_fused_column_process_dataframe(
         return runs
 
     class _TempSubject:
+        path: str | Path
+        raprompro: xr.Dataset | None
+
         def __init__(self, template: SupportsRainAnalysis, ds_one_time: xr.Dataset) -> None:
             self.path = getattr(template, "path", "")
             self.raprompro = ds_one_time
@@ -1893,7 +1922,7 @@ def build_fused_column_process_dataframe(
             subject,
             analysis=trends,
             classified=classified,
-            variables=tuple(resolved_vars_trend),
+            variables=resolved_vars_trend,
         ).reset_index()
 
         return df_one
@@ -1910,16 +1939,20 @@ def build_fused_column_process_dataframe(
             continue
 
         for run in runs:
-            z_top_fused = float(run["z_top_fused"])
-            z_bottom_fused = float(run["z_bottom_fused"])
+            z_top_fused = _float_from_dynamic(run["z_top_fused"], name="z_top_fused")
+            z_bottom_fused = _float_from_dynamic(run["z_bottom_fused"], name="z_bottom_fused")
             base_row = {
                 "time": time_value,
                 "run_process_label": run["run_process_label"],
                 "z_top_fused": z_top_fused,
                 "z_bottom_fused": z_bottom_fused,
-                "thickness_fused": float(run["thickness_fused"]),
+                "thickness_fused": _float_from_dynamic(
+                    run["thickness_fused"], name="thickness_fused"
+                ),
                 "z_center_fused": float(0.5 * (z_top_fused + z_bottom_fused)),
-                "n_windows_merged": int(run["n_windows_merged"]),
+                "n_windows_merged": _int_from_dynamic(
+                    run["n_windows_merged"], name="n_windows_merged"
+                ),
                 "recompute_error": None,
             }
             for extra_key in ("window_id_top", "window_id_bottom"):
