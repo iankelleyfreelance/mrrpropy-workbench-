@@ -9,8 +9,9 @@ from mrrpropy.analysis import processes as process_analysis
 from tests.rain_processes.test_process_scan_plots import (
     MIN_TAU_STRENGTH,
     WINDOW_STEP_M,
-    WINDOW_THICKNESS_M,    
+    WINDOW_THICKNESS_M,
 )
+
 
 @pytest.fixture(scope="session")
 def scan_df(raprompro_subset_10min_loaded_mrr) -> pd.DataFrame:
@@ -23,7 +24,9 @@ def scan_df(raprompro_subset_10min_loaded_mrr) -> pd.DataFrame:
     )
 
 
-def test_build_fused_column_process_dataframe(raprompro_subset_10min_loaded_mrr, scan_df):
+def test_build_fused_column_process_dataframe(
+    raprompro_subset_10min_loaded_mrr, scan_df
+):
     fused = process_analysis.build_fused_column_process_dataframe(
         raprompro_subset_10min_loaded_mrr,
         scan_df,
@@ -49,4 +52,3 @@ def test_build_fused_column_process_dataframe(raprompro_subset_10min_loaded_mrr,
 
     assert int(fused.loc[0, "n_windows_merged"]) >= 3
     assert float(fused.loc[0, "thickness_fused"]) > 0.0
-

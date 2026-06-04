@@ -326,7 +326,9 @@ def test_build_column_process_scan_dataframe(raprompro_subset_10min_loaded_mrr):
     assert scan_df["window_id"].nunique() >= 1
 
 
-def test_public_rain_process_analyze_defaults_to_scan(raprompro_subset_10min_loaded_mrr):
+def test_public_rain_process_analyze_defaults_to_scan(
+    raprompro_subset_10min_loaded_mrr,
+):
     scan_df = raprompro_subset_10min_loaded_mrr.rain_process_analyze(
         period=(datetime(2025, 10, 29, 19, 23, 0), datetime(2025, 10, 29, 19, 33, 0)),
         k=11,

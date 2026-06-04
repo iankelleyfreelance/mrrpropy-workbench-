@@ -60,7 +60,11 @@ def _is_valid_generated_product(path: Path) -> bool:
         return False
     try:
         ds = xr.open_dataset(path)
-        ok = "time" in ds.coords and ds.sizes.get("time", 0) > 0 and len(ds.data_vars) > 0
+        ok = (
+            "time" in ds.coords
+            and ds.sizes.get("time", 0) > 0
+            and len(ds.data_vars) > 0
+        )
         ds.close()
         return ok
     except Exception:

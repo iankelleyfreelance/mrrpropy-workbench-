@@ -45,6 +45,7 @@ def analysis(raprompro_subset_10min_loaded_mrr):
 def classified(raprompro_subset_10min_loaded_mrr, analysis):
     return raprompro_subset_10min_loaded_mrr.classify_rain_process(analysis=analysis)
 
+
 def _fixed_layer_artifact_dir(artifact_dir: Path) -> Path:
     path = artifact_dir
     path.mkdir(parents=True, exist_ok=True)
@@ -128,8 +129,11 @@ def test_plot_microphysics_summary_multipanel(
     if classified.attrs.get("max_tau_pvalue", "missing") is None:
         classified.attrs.pop("max_tau_pvalue", None)
     classified.attrs["rgb_mapping"] = str(classified.attrs["rgb_mapping"])
-    classified.to_netcdf(artifact_dir / f"{raprompro_subset_10min_loaded_mrr.path.stem}_process_classification.nc")    
-    
+    classified.to_netcdf(
+        artifact_dir
+        / f"{raprompro_subset_10min_loaded_mrr.path.stem}_process_classification.nc"
+    )
+
     assert isinstance(fig, Figure)
     assert isinstance(path, Path)
     assert path.exists()
@@ -321,7 +325,10 @@ def test_plot_process_vertical_percent_profiles(
     if process is None:
         pytest.skip("No classified process is available in this fixture.")
 
-    fig, path = raprompro_subset_10min_loaded_mrr.plot_process_vertical_percent_profiles(
+    (
+        fig,
+        path,
+    ) = raprompro_subset_10min_loaded_mrr.plot_process_vertical_percent_profiles(
         classified=classified,
         process=process,
         target_datetime=(

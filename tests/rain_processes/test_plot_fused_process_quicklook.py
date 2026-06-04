@@ -77,7 +77,15 @@ def test_plot_fused_process_quicklook_savefig(scan_df, fused_df, artifact_dir: P
     fig, path = plot_fused_process_quicklook(
         scan_df,
         fused_df,
-        processes=["breakup", "growth_depletion", "growth_depletion_loss", "growth_depletion_gain", "activation", "evaporation", "growth"],
+        processes=[
+            "breakup",
+            "growth_depletion",
+            "growth_depletion_loss",
+            "growth_depletion_gain",
+            "activation",
+            "evaporation",
+            "growth",
+        ],
         savefig=True,
         output_dir=output_dir,
         dpi=200,
@@ -104,10 +112,14 @@ def test_plot_fused_process_quicklook_processes_filter(scan_df, fused_df):
 
     first_label = str(pd.unique(fused_df["proc_label_fused"].astype(str))[0])
 
-    fig_keep, _ = plot_fused_process_quicklook(scan_df, fused_df, processes=[first_label])
+    fig_keep, _ = plot_fused_process_quicklook(
+        scan_df, fused_df, processes=[first_label]
+    )
     assert len(fig_keep.axes[0].patches) >= 1
     plt.close(fig_keep)
 
-    fig_drop, _ = plot_fused_process_quicklook(scan_df, fused_df, processes=["__no_such_process__"])
+    fig_drop, _ = plot_fused_process_quicklook(
+        scan_df, fused_df, processes=["__no_such_process__"]
+    )
     assert len(fig_drop.axes[0].patches) == 0
     plt.close(fig_drop)

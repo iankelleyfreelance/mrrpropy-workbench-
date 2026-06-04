@@ -1,8 +1,14 @@
 import numpy as np
 import xarray as xr
 
-from mrrpropy.analysis.processes import classify_process_from_features, classify_rain_process
-from mrrpropy.analysis.process_features import build_process_features, get_microphysical_features
+from mrrpropy.analysis.processes import (
+    classify_process_from_features,
+    classify_rain_process,
+)
+from mrrpropy.analysis.process_features import (
+    build_process_features,
+    get_microphysical_features,
+)
 
 
 def test_get_microphysical_features_fixed_layer_simple_profile():
@@ -49,7 +55,9 @@ def test_get_microphysical_features_scan_uses_z_center_as_layer_coord():
         }
     )
     ds["Dm"] = xr.DataArray(np.array([[4.0, 3.0, 2.0, 1.0]]), dims=("time", "range"))
-    ds["Nw"] = xr.DataArray(np.array([[40.0, 30.0, 20.0, 10.0]]), dims=("time", "range"))
+    ds["Nw"] = xr.DataArray(
+        np.array([[40.0, 30.0, 20.0, 10.0]]), dims=("time", "range")
+    )
     ds["LWC"] = xr.DataArray(np.array([[0.4, 0.3, 0.2, 0.1]]), dims=("time", "range"))
 
     z_top = xr.DataArray(np.array([100.0, 300.0], dtype=float), dims=("layer",))
@@ -81,7 +89,9 @@ def _synthetic_full_ds():
         }
     )
     ds["Dm"] = xr.DataArray(np.array([[4.0, 3.0, 2.0, 1.0]]), dims=("time", "range"))
-    ds["Nw"] = xr.DataArray(np.array([[40.0, 30.0, 20.0, 10.0]]), dims=("time", "range"))
+    ds["Nw"] = xr.DataArray(
+        np.array([[40.0, 30.0, 20.0, 10.0]]), dims=("time", "range")
+    )
     ds["LWC"] = xr.DataArray(np.array([[0.4, 0.3, 0.2, 0.1]]), dims=("time", "range"))
     ds["RR"] = xr.DataArray(np.array([[1.0, 2.0, 3.0, 4.0]]), dims=("time", "range"))
 
@@ -124,8 +134,12 @@ def test_build_process_features_fixed_layer_integration():
     ):
         assert v in pf
 
-    assert float((pf["Dm_bottom"] - pf["Dm_top"]).values[0]) == float(pf["delta_Dm"].values[0])
-    assert float((pf["v_mean_bottom"] - pf["v_mean_top"]).values[0]) == float(pf["delta_v_mean"].values[0])
+    assert float((pf["Dm_bottom"] - pf["Dm_top"]).values[0]) == float(
+        pf["delta_Dm"].values[0]
+    )
+    assert float((pf["v_mean_bottom"] - pf["v_mean_top"]).values[0]) == float(
+        pf["delta_v_mean"].values[0]
+    )
     assert pf["overlaps_bb"].dtype == bool
 
 
@@ -159,8 +173,14 @@ def test_build_process_features_scan_integration():
     ):
         assert v in pf
 
-    assert np.allclose((pf["Dm_bottom"] - pf["Dm_top"]).values, pf["delta_Dm"].values, equal_nan=True)
-    assert np.allclose((pf["v_mean_bottom"] - pf["v_mean_top"]).values, pf["delta_v_mean"].values, equal_nan=True)
+    assert np.allclose(
+        (pf["Dm_bottom"] - pf["Dm_top"]).values, pf["delta_Dm"].values, equal_nan=True
+    )
+    assert np.allclose(
+        (pf["v_mean_bottom"] - pf["v_mean_top"]).values,
+        pf["delta_v_mean"].values,
+        equal_nan=True,
+    )
     assert pf["overlaps_bb"].dtype == bool
 
 
@@ -211,9 +231,15 @@ def test_classify_rain_process_canonical_does_not_require_rgb_mapping():
         coords={"time": np.array(["2025-10-29T19:23:00"], dtype="datetime64[s]")}
     )
     for var in ("Dm", "Nw", "LWC"):
-        analysis[f"trend_sign_{var}"] = xr.DataArray(np.array([+1], dtype=int), dims=("time",))
-        analysis[f"trend_strength_{var}"] = xr.DataArray(np.array([1.0], dtype=float), dims=("time",))
-        analysis[f"trend_p_{var}"] = xr.DataArray(np.array([0.01], dtype=float), dims=("time",))
+        analysis[f"trend_sign_{var}"] = xr.DataArray(
+            np.array([+1], dtype=int), dims=("time",)
+        )
+        analysis[f"trend_strength_{var}"] = xr.DataArray(
+            np.array([1.0], dtype=float), dims=("time",)
+        )
+        analysis[f"trend_p_{var}"] = xr.DataArray(
+            np.array([0.01], dtype=float), dims=("time",)
+        )
 
     classified = classify_rain_process(None, analysis=analysis)
     assert str(classified["proc_label"].values[0]) == "activation"

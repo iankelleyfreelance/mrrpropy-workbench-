@@ -12,7 +12,9 @@ matplotlib.use("Agg")
 pytestmark = [pytest.mark.slow, pytest.mark.plot, pytest.mark.integration]
 
 WINDOW_THICKNESS_M = 500.0
-WINDOW_STEP_M = None  # Use the raw window step from the scan, which is typically around 100 m
+WINDOW_STEP_M = (
+    None  # Use the raw window step from the scan, which is typically around 100 m
+)
 MIN_TAU_STRENGTH = 0.5
 
 
@@ -58,7 +60,7 @@ def test_plot_column_process_scan(raprompro_subset_10min_loaded_mrr, artifact_di
     )
 
     fig, path = raprompro_subset_10min_loaded_mrr.plot_column_process_scan(
-        scan_df=scan_df,        
+        scan_df=scan_df,
         savefig=True,
         output_dir=output_dir,
         figsize=(10, 6),
@@ -106,7 +108,10 @@ def test_plot_column_process_scan_selected_processes(
         scan_df=scan_df,
         figsize=(10, 6),
     )
-    fig_selected, path_selected = raprompro_subset_10min_loaded_mrr.plot_column_process_scan(
+    (
+        fig_selected,
+        path_selected,
+    ) = raprompro_subset_10min_loaded_mrr.plot_column_process_scan(
         scan_df=scan_df,
         processes=selected_processes + ["steady_or_weakk"],
         savefig=True,
@@ -150,7 +155,15 @@ def test_plot_column_process_scan_hexagram_colors(
     fig, path = raprompro_subset_10min_loaded_mrr.plot_column_process_scan(
         scan_df=scan_df,
         color_mode="hexagram",
-        processes=['breakup', 'growth_depletion', 'growth_depletion_loss', 'growth_depletion_gain', 'activation', 'evaporation', 'growth'],
+        processes=[
+            "breakup",
+            "growth_depletion",
+            "growth_depletion_loss",
+            "growth_depletion_gain",
+            "activation",
+            "evaporation",
+            "growth",
+        ],
         savefig=True,
         output_dir=output_dir,
         figsize=(10, 6),
