@@ -16,6 +16,7 @@ WINDOW_THICKNESS_M = 600.0
 WINDOW_STEP_M = 200.0
 MIN_TAU_STRENGTH = 0.5
 
+
 def _to_python_datetime(value: object) -> object:
     """Convert a timestamp-like value to `datetime` without nanosecond warnings."""
     return pd.Timestamp(value).round("us").to_pydatetime()
@@ -382,6 +383,8 @@ def _save_column_event_scan(
     *,
     period: tuple[pd.Timestamp, pd.Timestamp],
     k: int,
+    window_thickness_m: float,
+    window_step_m: float,
     output_dir: Path,
     dpi: int,
 ) -> None:
@@ -390,8 +393,8 @@ def _save_column_event_scan(
     scan_df = mrr.build_column_process_scan_dataframe(
         period=(_to_python_datetime(period[0]), _to_python_datetime(period[1])),
         k=k,
-        window_thickness_m=WINDOW_THICKNESS_M,
-        window_step_m=WINDOW_STEP_M,
+        window_thickness_m=window_thickness_m,
+        window_step_m=window_step_m,
         min_tau_strength=MIN_TAU_STRENGTH,
         trend_method="kendall_theilsen",
     )
@@ -443,7 +446,15 @@ def _save_column_event_scan(
         fig, _ = mrr.plot_column_process_scan(
             scan_df=scan_df_plot,
             color_mode="hexagram",
-            processes=['breakup', 'growth_depletion', 'growth_depletion_loss', 'growth_depletion_gain', 'activation', 'evaporation', 'growth'],
+            processes=[
+                "breakup",
+                "growth_depletion",
+                "growth_depletion_loss",
+                "growth_depletion_gain",
+                "activation",
+                "evaporation",
+                "growth",
+            ],
             savefig=True,
             output_dir=output_dir,
             figsize=(14, 7),
@@ -457,7 +468,15 @@ def _save_column_event_scan(
         fig, _ = mrr.plot_column_process_scan(
             scan_df=scan_df_events,
             color_mode="process",
-            processes=['breakup', 'growth_depletion', 'growth_depletion_loss', 'growth_depletion_gain', 'activation', 'evaporation', 'growth'],
+            processes=[
+                "breakup",
+                "growth_depletion",
+                "growth_depletion_loss",
+                "growth_depletion_gain",
+                "activation",
+                "evaporation",
+                "growth",
+            ],
             savefig=False,
             output_dir=output_dir,
             figsize=(14, 7),
@@ -469,7 +488,9 @@ def _save_column_event_scan(
         period_end = scan_df_events.attrs.get("period_end", "t1")
         safe_t0 = str(period_start).replace(":", "").replace("-", "").replace(" ", "_")
         safe_t1 = str(period_end).replace(":", "").replace("-", "").replace(" ", "_")
-        events_path = output_dir / f"column_process_events_hexagram_{safe_t0}_{safe_t1}.png"
+        events_path = (
+            output_dir / f"column_process_events_hexagram_{safe_t0}_{safe_t1}.png"
+        )
         fig.savefig(events_path, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
 
@@ -553,6 +574,18 @@ def main() -> None:
         help="Hexagram resolution parameter.",
     )
     parser.add_argument(
+        "--window-thickness-m",
+        type=float,
+        default=WINDOW_THICKNESS_M,
+        help="Vertical thickness of the column-scan moving window in metres.",
+    )
+    parser.add_argument(
+        "--window-step-m",
+        type=float,
+        default=WINDOW_STEP_M,
+        help="Vertical step of the column-scan moving window in metres.",
+    )
+    parser.add_argument(
         "--dpi",
         type=int,
         default=150,
@@ -568,6 +601,8 @@ def main() -> None:
     print(f"Input file      : {raw_path}")
     print(f"Output root     : {output_root}")
     print(f"Column analysis : automatic whole-column scan")
+    print(f"Window thickness: {args.window_thickness_m:g} m")
+    print(f"Window step     : {args.window_step_m:g} m")
     print(f"Hexagram k      : {args.k}")
 
     mrr = MRRProData.from_file(raw_path)
@@ -585,7 +620,10 @@ def main() -> None:
         column_dir = (
             output_root
             / "plots"
-            / "column_process_events_hexagram_w500_step35"
+            / (
+                "column_process_events_hexagram_"
+                f"w{int(args.window_thickness_m)}_step{int(args.window_step_m)}"
+            )
             / raw_path.stem
         )
 
@@ -632,6 +670,8 @@ def main() -> None:
             mrr,
             period=period,
             k=args.k,
+            window_thickness_m=float(args.window_thickness_m),
+            window_step_m=float(args.window_step_m),
             output_dir=column_dir,
             dpi=args.dpi,
         )
