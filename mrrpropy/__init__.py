@@ -16,6 +16,6 @@ workflow-controlled optimization work.
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = ["PACKAGE_DIR", "__version__"]

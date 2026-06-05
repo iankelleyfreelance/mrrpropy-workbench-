@@ -13,6 +13,34 @@ versioning for published package releases.
 
 ### Fixed
 
+## [0.3.0]
+
+### Added
+
+- Plot examples gallery in the documentation, including regenerated example
+  figures for processed spectra and microphysical profiles.
+- Public velocity-convention metadata on RaProMPro outputs and spectral
+  rain-process features.
+
+### Changed
+
+- Public Doppler/fall velocity outputs now use the negative-downward convention:
+  `W`, `spe_3D.speed`, spectral plots, and spectral process features expose
+  falling hydrometeors as negative velocity.
+- `MRRProData.plot_spectrogram(spectrum_var="spe_3D")` converts legacy
+  positive-downward processed spectra at the plotting boundary when loaded
+  products do not declare the new convention.
+- The microphysical profile example now distinguishes `LWC_all` and `LWC` with
+  clearer colors, widths, and markers.
+- The plot examples gallery uses a fixed two-column desktop layout with mobile
+  fallback and wraps long method names.
+
+### Fixed
+
+- Loading an older RaProMPro product now warns when its velocity convention is
+  ambiguous, preventing silent interpretation of legacy positive-downward
+  `W`/`speed` as current public output.
+
 ## [0.2.0]
 
 ### Added
