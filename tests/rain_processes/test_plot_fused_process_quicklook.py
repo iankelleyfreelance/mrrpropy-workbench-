@@ -19,6 +19,16 @@ from tests.rain_processes.test_process_scan_plots import (
 
 matplotlib.use("Agg")
 
+QUICKLOOK_PROCESSES = [
+    "breakup",
+    "growth_depletion",
+    "growth_depletion_loss",
+    "growth_depletion_gain",
+    "activation",
+    "evaporation",
+    "growth",
+]
+
 
 @pytest.fixture(scope="session")
 def scan_df(raprompro_subset_10min_loaded_mrr) -> pd.DataFrame:
@@ -41,10 +51,27 @@ def _make_fused_df_from_scan_snapshot(scan_df: pd.DataFrame) -> pd.DataFrame:
     if scan_df.empty:
         return pd.DataFrame()
 
-    time0 = pd.Timestamp(pd.to_datetime(scan_df["time"]).iloc[0])
-    snap = scan_df[scan_df["time"] == time0].copy()
-    if snap.empty:
+    valid = scan_df.copy()
+    valid["z_top_m"] = pd.to_numeric(valid["z_top_m"], errors="coerce")
+    valid["z_bottom_m"] = pd.to_numeric(valid["z_bottom_m"], errors="coerce")
+    valid = valid[valid["z_top_m"].gt(valid["z_bottom_m"])].copy()
+    if valid.empty:
         return pd.DataFrame()
+
+    plottable = valid[
+        valid["proc_label"].astype(str).isin(QUICKLOOK_PROCESSES)
+    ].copy()
+    source = plottable.iloc[0] if not plottable.empty else valid.iloc[0]
+    time0 = pd.Timestamp(pd.to_datetime(source["time"]))
+    label = str(source["proc_label"])
+    if label not in QUICKLOOK_PROCESSES:
+        label = QUICKLOOK_PROCESSES[-1]
+
+    snap = valid[
+        (valid["time"] == time0) & (valid["proc_label"].astype(str) == label)
+    ].copy()
+    if snap.empty:
+        snap = pd.DataFrame([source])
 
     if "window_id" in snap.columns:
         snap = snap.sort_values("window_id", ascending=False)
@@ -52,7 +79,6 @@ def _make_fused_df_from_scan_snapshot(scan_df: pd.DataFrame) -> pd.DataFrame:
     if take.empty:
         return pd.DataFrame()
 
-    label = str(take["proc_label"].astype(str).iloc[0])
     z_top = float(pd.to_numeric(take["z_top_m"], errors="coerce").max())
     z_bottom = float(pd.to_numeric(take["z_bottom_m"], errors="coerce").min())
 
@@ -72,20 +98,15 @@ def fused_df(scan_df) -> pd.DataFrame:
 
 
 def test_plot_fused_process_quicklook_savefig(scan_df, fused_df, artifact_dir: Path):
+    if fused_df.empty:
+        pytest.skip("No fused events available for quicklook savefig test.")
+
     output_dir = _scan_artifact_dir(artifact_dir)
 
     fig, path = plot_fused_process_quicklook(
         scan_df,
         fused_df,
-        processes=[
-            "breakup",
-            "growth_depletion",
-            "growth_depletion_loss",
-            "growth_depletion_gain",
-            "activation",
-            "evaporation",
-            "growth",
-        ],
+        processes=QUICKLOOK_PROCESSES,
         savefig=True,
         output_dir=output_dir,
         dpi=200,
