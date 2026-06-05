@@ -196,7 +196,7 @@ a:hover {
 
 .example-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1rem;
 }
@@ -214,6 +214,11 @@ a:hover {
 .plot-card h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.plot-card h3 code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .plot-card p {
@@ -269,6 +274,12 @@ ol {
 
 @media (max-width: 850px) {
   .hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .example-grid {
     grid-template-columns: 1fr;
   }
 }
