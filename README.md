@@ -56,7 +56,8 @@ uv run python -c "import mrrpropy"
 uv run pytest -m "not slow"
 uv run pytest -m slow
 uv run mypy
-uv run black --check mrrpropy tests
+uv run black --check mrrpropy/cli tests
+uv run pre-commit install
 uv run python scripts/benchmark_raprompro.py --quick --repeats 1
 ```
 
