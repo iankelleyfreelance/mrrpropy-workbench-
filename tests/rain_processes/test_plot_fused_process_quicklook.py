@@ -58,9 +58,7 @@ def _make_fused_df_from_scan_snapshot(scan_df: pd.DataFrame) -> pd.DataFrame:
     if valid.empty:
         return pd.DataFrame()
 
-    plottable = valid[
-        valid["proc_label"].astype(str).isin(QUICKLOOK_PROCESSES)
-    ].copy()
+    plottable = valid[valid["proc_label"].astype(str).isin(QUICKLOOK_PROCESSES)].copy()
     source = plottable.iloc[0] if not plottable.empty else valid.iloc[0]
     time0 = pd.Timestamp(pd.to_datetime(source["time"]))
     label = str(source["proc_label"])
