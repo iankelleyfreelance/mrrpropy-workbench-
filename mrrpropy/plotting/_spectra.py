@@ -35,7 +35,8 @@ def get_velocity_axis(subject: SupportsSpectralAccess, n_bins: int) -> np.ndarra
 
     MRR-PRO files often omit an explicit per-bin velocity coordinate. When that
     happens, infer it from the VEL fold limit if available, otherwise fall back
-    to a 12 m/s Nyquist-like upper bound.
+    to a 12 m/s Nyquist-like upper bound. This helper returns the raw/internal
+    positive-downward bin order; plotting converts it at the output boundary.
     """
     ds = subject.ds
     vny = 12.0
@@ -46,6 +47,38 @@ def get_velocity_axis(subject: SupportsSpectralAccess, n_bins: int) -> np.ndarra
             except Exception:
                 pass
     return np.linspace(0.0, vny, int(n_bins), dtype=float)
+
+
+def _as_negative_downward_axis(
+    velocity: np.ndarray,
+    spectrum: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Convert positive-downward spectra to the public negative-downward convention.
+
+    The input spectral bins are ordered with the raw/product positive-downward
+    axis. Multiplying by -1 requires reversing both coordinate and data so each
+    bin remains attached to its physical velocity.
+    """
+    vel = np.asarray(velocity, dtype=float)
+    spec = np.asarray(spectrum, dtype=float)
+    if vel.size <= 1:
+        return -vel, spec
+    converted_vel = -vel[::-1]
+    converted_spec = np.flip(spec, axis=-1)
+    return converted_vel, converted_spec
+
+
+def _has_negative_downward_velocity_convention(ds: xr.Dataset) -> bool:
+    convention = str(ds.attrs.get("velocity_convention", ""))
+    if convention.startswith("Public RaProMPro velocity outputs use negative-downward"):
+        return True
+    if "speed" in ds.coords:
+        positive = str(ds["speed"].attrs.get("positive", "")).strip().lower()
+        description = str(ds["speed"].attrs.get("description", "")).strip().lower()
+        if positive == "up" and "negative" in description and "downward" in description:
+            return True
+    return False
 
 
 def get_spectrum_1d(
@@ -81,8 +114,11 @@ def get_spectrum_1d(
         )
 
     if ("time" in da.dims) and ("range" in da.dims):
-        spectrum = da.sel(time=t_sel, range=r_sel, method="nearest").values.astype(float)
+        spectrum = da.sel(time=t_sel, range=r_sel, method="nearest").values.astype(
+            float
+        )
         vel = get_velocity_axis(subject, spectrum.shape[-1])
+        vel, spectrum = _as_negative_downward_axis(vel, spectrum)
         return t_sel, r_sel, vel, spectrum, units
 
     if ("time" in da.dims) and ("n_spectra" in da.dims):
@@ -90,14 +126,11 @@ def get_spectrum_1d(
             raise KeyError(
                 f"'{spectrum_var}' es (time,n_spectra,bin) pero falta 'index_spectra(time,range)'."
             )
-        idx = (
-            ds["index_spectra"]
-            .sel(time=t_sel, range=r_sel, method="nearest")
-            .values
-        )
+        idx = ds["index_spectra"].sel(time=t_sel, range=r_sel, method="nearest").values
         js = int(idx)
         spectrum = da.sel(time=t_sel, n_spectra=js).values.astype(float)
         vel = get_velocity_axis(subject, spectrum.shape[-1])
+        vel, spectrum = _as_negative_downward_axis(vel, spectrum)
         return t_sel, r_sel, vel, spectrum, units
 
     raise ValueError(f"Formato de '{spectrum_var}' no soportado. dims={da.dims}")
@@ -139,14 +172,18 @@ def get_spectrogram_2d(
     if "spectrum_n_samples" in da.sizes:
         n_bins = da.sizes["spectrum_n_samples"]
         vel = get_velocity_axis(subject, int(n_bins))
+        raw_positive_downward_axis = True
     else:
-        if subject.raprompro is not None and "speed" in subject.raprompro:
-            vel = np.asarray(subject.raprompro["speed"].values, dtype=float)
+        if "speed" in ds.coords:
+            vel = np.asarray(ds["speed"].values, dtype=float)
+            raw_positive_downward_axis = not _has_negative_downward_velocity_convention(ds)
         else:
             raise ValueError("velocity not found in raprompro Dataset.")
 
     if ("time" in da.dims) and ("range" in da.dims):
         spec2d = da.sel(time=t_sel, range=slice(r0, r1)).values.astype(float)
+        if raw_positive_downward_axis:
+            vel, spec2d = _as_negative_downward_axis(vel, spec2d)
         return t_sel, ranges, vel, spec2d, units
 
     if ("time" in da.dims) and ("n_spectra" in da.dims):
@@ -159,6 +196,8 @@ def get_spectrogram_2d(
         )
         slab = da.sel(time=t_sel).values.astype(float)
         spec2d = slab[idx_vec, :]
+        if raw_positive_downward_axis:
+            vel, spec2d = _as_negative_downward_axis(vel, spec2d)
         return t_sel, ranges, vel, spec2d, units
 
     raise ValueError(f"Formato de '{spectrum_var}' no soportado. dims={da.dims}")

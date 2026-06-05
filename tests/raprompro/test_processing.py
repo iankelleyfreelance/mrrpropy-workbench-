@@ -112,6 +112,8 @@ def test_process_raprompro_regression(
         x = raw_var.values.ravel()
         y = generated_var.values.ravel()
 
+        if v1 == "W":
+            x = -x
         if v1 == "DBPIA":
             y = np.abs(y)
 
@@ -166,6 +168,14 @@ def test_process_raprompro_generated_metadata(
 
     assert missing_long_name == []
     assert missing_units == []
+    assert ds.attrs["velocity_convention"].startswith(
+        "Public RaProMPro velocity outputs use negative-downward"
+    )
+    assert ds["W"].attrs["positive"] == "up"
+    assert "negative" in ds["W"].attrs["convention"]
+    assert np.nanmedian(ds["W"].values) < 0.0
+    assert ds["speed"].attrs["positive"] == "up"
+    assert np.all(np.diff(ds["speed"].values) > 0.0)
 
 
 @pytest.mark.plot
@@ -183,6 +193,8 @@ def test_process_raprompro_generated_visual_comparison(
         )
         x = raw_var.values.ravel()
         y = generated_var.values.ravel()
+        if v1 == "W":
+            x = -x
 
         idx = np.where(np.isfinite(x) & np.isfinite(y))[0]
         if idx.size < 10:

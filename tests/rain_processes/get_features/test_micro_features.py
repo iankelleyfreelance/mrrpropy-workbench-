@@ -85,7 +85,7 @@ def _synthetic_full_ds():
         coords={
             "time": np.array(["2025-10-29T19:23:00"], dtype="datetime64[s]"),
             "range": np.array([0.0, 100.0, 200.0, 300.0], dtype=float),
-            "velocity": np.array([0.0, 2.0], dtype=float),
+            "velocity": np.array([-2.0, 0.0], dtype=float),
         }
     )
     ds["Dm"] = xr.DataArray(np.array([[4.0, 3.0, 2.0, 1.0]]), dims=("time", "range"))
@@ -96,10 +96,10 @@ def _synthetic_full_ds():
     ds["RR"] = xr.DataArray(np.array([[1.0, 2.0, 3.0, 4.0]]), dims=("time", "range"))
 
     spectrum = np.zeros((1, 4, 2), dtype=float)
-    spectrum[0, 0, :] = np.array([0.0, 1.0])
-    spectrum[0, 1, :] = np.array([0.0, 1.0])
-    spectrum[0, 2, :] = np.array([1.0, 0.0])
-    spectrum[0, 3, :] = np.array([1.0, 0.0])
+    spectrum[0, 0, :] = np.array([1.0, 0.0])
+    spectrum[0, 1, :] = np.array([1.0, 0.0])
+    spectrum[0, 2, :] = np.array([0.0, 1.0])
+    spectrum[0, 3, :] = np.array([0.0, 1.0])
     ds["spectrum"] = xr.DataArray(spectrum, dims=("time", "range", "velocity"))
     return ds
 

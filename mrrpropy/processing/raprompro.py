@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -30,6 +31,11 @@ def process_raprompro(
     The resulting dataset follows the variable naming used by the scientific
     RaProMPro workflow, including fields such as ``Type``, ``DBPIA``, ``Za``,
     ``Zea``, ``Ze``, ``Dm``, ``Nw``, ``LWC`` and ``RR``.
+
+    Public velocity outputs use negative values for downward hydrometeor motion.
+    The retained scientific core keeps its original positive-downward convention
+    internally; the sign is converted when ``W`` and optional spectral velocity
+    coordinates are exposed in the returned dataset.
     """
     if subject.raprompro is not None:
         return subject.raprompro
@@ -200,6 +206,10 @@ def process_raprompro(
     # Full matrices (time, range)
     def _empty_2d() -> np.ndarray:
         return np.full((ntime, Nhei), np.nan, dtype=float)
+
+    def _negative_downward_spectrum_axis() -> np.ndarray:
+        """Public output convention: Doppler/fall velocity is negative downward."""
+        return -np.arange(-Nbins * fNy, 2 * Nbins * fNy, fNy)[::-1]
 
     estat_full = _empty_2d()
     sk_full = _empty_2d()
@@ -408,7 +418,9 @@ def process_raprompro(
         sk_full[it, :] = sk_arr
         kur_full[it, :] = kur_arr
         PIA_full[it, :] = np.asarray(pIA, dtype=float)
-        w_full[it, :] = w_arr
+        # RaProMPro internals use positive-downward fall speed. Public outputs use
+        # the meteorological convention: falling hydrometeors have negative W.
+        w_full[it, :] = -w_arr
         sig_full[it, :] = sig_arr
         LWC_full[it, :] = Lwc_arr
         RR_full[it, :] = Rr_arr
@@ -544,7 +556,18 @@ def process_raprompro(
         "1",
         "Predominant hydrometeor type classification code (original CLI)",
     )
-    _da2("W", w_full, "m s-1", "Fall speed with aliasing correction")
+    _da2(
+        "W",
+        w_full,
+        "m s-1",
+        "Fall velocity with aliasing correction (negative downward)",
+    )
+    out["W"].attrs.update(
+        {
+            "positive": "up",
+            "convention": "negative values indicate downward hydrometeor motion",
+        }
+    )
     _da2(
         "spectral width",
         sig_full,
@@ -603,12 +626,8 @@ def process_raprompro(
     )
     _da2("LWC_all", lwc_all_full, "g m-3", "LWC assuming all liquid")
     _da2("RR_all", rr_all_full, "mm hr-1", "RR assuming all liquid")
-    _da2(
-        "N_all", n_all_full, "log10(m-3 mm-1)", "log10(total N) assuming all liquid"
-    )
-    _da2(
-        "Nw", nw_full, "log10(mm-1 m-3)", "Normalized intercept parameter (by Type)"
-    )
+    _da2("N_all", n_all_full, "log10(m-3 mm-1)", "log10(total N) assuming all liquid")
+    _da2("Nw", nw_full, "log10(mm-1 m-3)", "Normalized intercept parameter (by Type)")
     _da2("Dm", dm_full, "mm", "Mean mass-weighted diameter (by Type)")
     _da2(
         "Nw_all",
@@ -624,6 +643,16 @@ def process_raprompro(
         N_da_full,
         "log10(m-3 mm-1)",
         "log10(N(D)) derived (original 'N_da')",
+    )
+
+    out.attrs.update(
+        {
+            "velocity_convention": (
+                "Public RaProMPro velocity outputs use negative-downward "
+                "Doppler/fall velocity. Internal processing keeps the legacy "
+                "positive-downward convention."
+            )
+        }
     )
 
     # BB as (time,BB_Height) to mirror CLI netCDF shape
@@ -655,14 +684,25 @@ def process_raprompro(
     # Optional 3D products (names follow original netCDF)
     if save_spe_3d:
         out["spe_3D"] = xr.DataArray(
-            np.asarray(spe_3d_list, dtype=float),
+            np.asarray(spe_3d_list, dtype=float)[..., ::-1],
             dims=("time", "range", "speed"),
             coords={
                 "time": coords["time"],
                 "range": coords["range"],
-                "speed": np.arange(-Nbins * fNy, 2 * Nbins * fNy, fNy),
+                "speed": _negative_downward_spectrum_axis(),
             },
-            attrs=_attrs("mm-1", "Dealiased spectral reflectivity (original CLI)"),
+            attrs=_attrs(
+                "mm-1",
+                "Dealiased spectral reflectivity on negative-downward velocity axis",
+            ),
+        )
+        out["speed"].attrs.update(
+            {
+                "units": "m s-1",
+                "long_name": "Doppler velocity",
+                "description": "Doppler velocity coordinate; negative values indicate downward motion.",
+                "positive": "up",
+            }
         )
 
     if save_dsd_3d:
@@ -768,6 +808,18 @@ def load_raprompro(
                 f"El raprompro cargado no parece un output válido: faltan {missing}. "
                 f"vars={list(ds_rp.data_vars)}"
             )
+        velocity_convention = str(ds_rp.attrs.get("velocity_convention", ""))
+        if "W" in ds_rp and not velocity_convention.startswith(
+            "Public RaProMPro velocity outputs use negative-downward"
+        ):
+            warnings.warn(
+                "Loaded raprompro product does not declare the current "
+                "negative-downward velocity convention. Older products may use "
+                "positive-downward W/speed; regenerate the product to get "
+                "unambiguous public velocity outputs.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         # 3) Compatibilidad con subject.ds (time/range)
         #    (si no quieres esto, pon validate=False)
@@ -793,4 +845,3 @@ def load_raprompro(
         subject.raprompro = ds_rp
 
     return ds_rp
-

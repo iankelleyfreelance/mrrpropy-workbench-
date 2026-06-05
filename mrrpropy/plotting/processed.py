@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-import matplotlib.colors as mcolors
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -351,23 +350,20 @@ def plot_microphysical_properties_profiles(
     ax.plot(
         profile["LWC_all"].values,
         heights_km,
-        linewidth=5,
-        marker="v",
-        markersize=10,
+        linewidth=kwargs.get("LWC_all_linewidth", 5),
+        marker=kwargs.get("LWC_all_marker", "o"),
+        markersize=kwargs.get("LWC_all_markersize", 8),
         label="LWC_all",
-    )
-    delta = kwargs.get("LWC_all_marker_color_delta", 0.3)
-    color_light = tuple(
-        min(1.0, channel + delta) for channel in mcolors.to_rgb(ax.lines[-1].get_color())
+        color=kwargs.get("LWC_all_color", "tab:blue"),
     )
     ax.plot(
         profile["LWC"].values,
         heights_km,
-        linewidth=1,
-        marker="o",
-        markersize=4,
+        linewidth=kwargs.get("LWC_linewidth", 1.25),
+        marker=kwargs.get("LWC_marker", "."),
+        markersize=kwargs.get("LWC_markersize", 7),
         label="LWC",
-        color=color_light,
+        color=kwargs.get("LWC_color", "tab:orange"),
     )
     ax.legend(loc="best")
     ax.set_xlabel(r"LWC, g m_^{-3}")

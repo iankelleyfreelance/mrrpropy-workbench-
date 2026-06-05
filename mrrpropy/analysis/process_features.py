@@ -245,7 +245,9 @@ def get_spectral_features(
     Build Doppler spectral features for one layer (fixed_layer) or many (scan).
 
     ds[spectrum_var] must have dims (time, range, velocity) and be non-negative.
-    velocity is in m/s, positive downward.
+    velocity is in m/s using the public mrrpropy convention: negative downward.
+    Therefore ``delta_v_*`` is bottom minus top; stronger downward motion at the
+    bottom appears as a more negative delta.
 
     Inputs `z_top`, `z_bottom`, `z_center`:
     - fixed_layer: scalar DataArray (meters)
@@ -412,6 +414,34 @@ def get_spectral_features(
     out["v_p90_top"] = xr.DataArray(v_p90_top, dims=out_dims)
     out["v_p90_bottom"] = xr.DataArray(v_p90_bottom, dims=out_dims)
     out["delta_v_p90"] = out["v_p90_bottom"] - out["v_p90_top"]
+
+    for name in (
+        "v_mean_top",
+        "v_mean_bottom",
+        "v_p10_top",
+        "v_p10_bottom",
+        "v_p50_top",
+        "v_p50_bottom",
+        "v_p90_top",
+        "v_p90_bottom",
+    ):
+        out[name].attrs.update(
+            {
+                "units": "m s-1",
+                "positive": "up",
+                "convention": "negative values indicate downward hydrometeor motion",
+            }
+        )
+    for name in ("v_std_top", "v_std_bottom", "delta_v_std"):
+        out[name].attrs["units"] = "m s-1"
+    for name in ("delta_v_mean", "delta_v_p10", "delta_v_p50", "delta_v_p90"):
+        out[name].attrs.update(
+            {
+                "units": "m s-1",
+                "positive": "up",
+                "description": "Bottom minus top velocity difference; negative values indicate stronger downward motion at the bottom.",
+            }
+        )
 
     return out
 

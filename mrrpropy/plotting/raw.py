@@ -107,7 +107,7 @@ def plot_spectrum(
     else:
         ax.set_xlim(float(np.nanmin(vel)), float(np.nanmax(vel)))
 
-    ax.set_xlabel("Doppler velocity [m/s]")
+    ax.set_xlabel("Doppler velocity [m/s, negative downward]")
     ax.set_ylabel(f"Spectrum [{units}]" if units else "Spectrum")
     ax.set_title("MRR-PRO spectrum")
     ax.axvline(x=0.0, color="black", linestyle="--", linewidth=1.0)
@@ -169,15 +169,20 @@ def plot_spectra_by_range(
         ds["time"].sel(time=target_datetime, method="nearest").values,
     )
 
-    vel: np.ndarray | None = None
+    vel_internal: np.ndarray | None = None
     for vname in ("velocity", "doppler_velocity", "velocity_vectors", "vel"):
         if vname in ds:
             velocity_da = ds[vname]
             if "spectrum_n_samples" in velocity_da.dims and len(velocity_da.dims) == 1:
-                vel = velocity_da.values.astype(float)
+                vel_internal = velocity_da.values.astype(float)
             break
-    if vel is None:
-        vel = _spectra.get_velocity_axis(subject, int(ds.sizes["spectrum_n_samples"]))
+    if vel_internal is None:
+        vel_internal = _spectra.get_velocity_axis(
+            subject, int(ds.sizes["spectrum_n_samples"])
+        )
+    vel, _ = _spectra._as_negative_downward_axis(
+        vel_internal, np.empty_like(vel_internal)
+    )
 
     if fig is None and ax is None:
         fig, ax = plt.subplots(figsize=figsize)
@@ -219,16 +224,22 @@ def plot_spectra_by_range(
             spectrum_idx = int(idx_raw)
             if not (0 <= spectrum_idx < ds.sizes["n_spectra"]):
                 continue
-            spectrum = ds[spec_var].sel(time=t_sel).values.astype(float)[spectrum_idx, :]
+            spectrum = (
+                ds[spec_var].sel(time=t_sel).values.astype(float)[spectrum_idx, :]
+            )
         else:
-            spectrum_da = ds[spec_var].sel(time=t_sel, range=selected_range, method="nearest")
+            spectrum_da = ds[spec_var].sel(
+                time=t_sel, range=selected_range, method="nearest"
+            )
             if "spectrum_n_samples" not in spectrum_da.dims:
                 raise ValueError(
                     f"{spec_var} does not have 'spectrum_n_samples' dimension."
                 )
             spectrum = spectrum_da.values.astype(float)
 
-        plotted_spectrum = spectrum
+        _, plotted_spectrum = _spectra._as_negative_downward_axis(
+            vel_internal, spectrum
+        )
         if use_db:
             with np.errstate(divide="ignore", invalid="ignore"):
                 plotted_spectrum = 10.0 * np.log10(
@@ -250,7 +261,7 @@ def plot_spectra_by_range(
         )
 
     ax.axvline(x=0.0, color="black", linestyle="--", linewidth=1.0)
-    ax.set_xlabel("Doppler velocity [m/s]")
+    ax.set_xlabel("Doppler velocity [m/s, negative downward]")
     ax.set_ylabel("Spectrum [dB]" if use_db else "Spectrum [linear]")
 
     title = kwargs.get("title")
@@ -334,10 +345,10 @@ def plot_spectrogram(
         im.set_clim(vmin=vmin, vmax=vmax)
 
     ax.axvline(x=0.0, color="black", linestyle="--", linewidth=1.0)
-    ax.set_xlabel("Doppler velocity [m/s]")
+    ax.set_xlabel("Doppler velocity [m/s, negative downward]")
     ax.set_ylabel("Range [m]")
     ax.set_title(f"MRR-PRO spectrogram \n {t_txt}")
-    ax.set_xlim(kwargs.get("x_limits", (-4, 12)))
+    ax.set_xlim(kwargs.get("x_limits", (-12, 4)))
 
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label(f"Spectrum [{units}]" if units else "Spectrum")

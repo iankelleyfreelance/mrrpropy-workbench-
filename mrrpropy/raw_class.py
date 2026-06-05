@@ -298,7 +298,8 @@ class MRRProData:
         Returns
         -------
         (vel, spec)
-        vel  : DataArray with Doppler velocity (m/s, typically)
+        vel  : DataArray with raw-file Doppler velocity (m/s, typically).
+               Plotting methods expose velocity with negative values downward.
         spec : DataArray with spectrum (N or spectrum_raw)
         """
         if "index_spectra" not in self.ds:
@@ -557,6 +558,8 @@ class MRRProData:
 
         The method supports the spectral variables already exposed by the raw
         MRR-PRO files, typically ``spectrum_reflectivity`` or ``spectrum_raw``.
+        The plotted Doppler velocity axis follows the public mrrpropy convention:
+        negative values indicate downward hydrometeor motion.
 
         Parameters
         ----------
@@ -634,6 +637,7 @@ class MRRProData:
         This method overlays spectra for the nearest (time, range) gates.
         It relies on the RAW spectral variable 'spectrum_reflectivity' (preferred) or
         falls back to 'spectrum' if present.
+        The plotted Doppler velocity axis uses negative values for downward motion.
 
         Parameters
         ----------
@@ -695,6 +699,7 @@ class MRRProData:
     ) -> tuple[Figure, Path | None]:
         """
         Plot a range-by-velocity spectrogram at the nearest requested time.
+        The displayed velocity axis uses negative values for downward motion.
 
         Parameters
         ----------

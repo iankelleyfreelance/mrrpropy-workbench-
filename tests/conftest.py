@@ -64,6 +64,9 @@ def _is_valid_generated_product(path: Path) -> bool:
             "time" in ds.coords
             and ds.sizes.get("time", 0) > 0
             and len(ds.data_vars) > 0
+            and str(ds.attrs.get("velocity_convention", "")).startswith(
+                "Public RaProMPro velocity outputs use negative-downward"
+            )
         )
         ds.close()
         return ok

@@ -4,8 +4,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+import xarray as xr
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+from mrrpropy.plotting import _spectra
 
 matplotlib.use("Agg")
 
@@ -124,6 +127,45 @@ def test_plot_dealiased_spectrogram(raprompro_subset_10min_loaded_mrr, artifact_
     assert filepath is not None
     assert filepath.exists()
     plt.close(fig)
+
+
+def test_dealiased_spectrogram_converts_legacy_positive_downward_speed():
+    class Subject:
+        path = "synthetic.nc"
+        ds = xr.Dataset(
+            coords={
+                "time": np.array(["2025-10-29T19:28:00"], dtype="datetime64[s]"),
+                "range": np.array([0.0, 100.0], dtype=float),
+            }
+        )
+
+    legacy_speed = np.array([-1.0, 0.0, 1.0, 2.0], dtype=float)
+    spe = np.array(
+        [
+            [
+                [10.0, 20.0, 30.0, 40.0],
+                [50.0, 60.0, 70.0, 80.0],
+            ]
+        ],
+        dtype=float,
+    )
+    Subject.raprompro = xr.Dataset(
+        {"spe_3D": (("time", "range", "speed"), spe)},
+        coords={
+            "time": Subject.ds["time"].values,
+            "range": Subject.ds["range"].values,
+            "speed": legacy_speed,
+        },
+    )
+
+    _, _, vel, spec2d, _ = _spectra.get_spectrogram_2d(
+        Subject,
+        np.datetime64("2025-10-29T19:28:00"),
+        spectrum_var="spe_3D",
+    )
+
+    assert np.allclose(vel, np.array([-2.0, -1.0, 0.0, 1.0]))
+    assert np.allclose(spec2d[0], np.array([40.0, 30.0, 20.0, 10.0]))
 
 
 def test_plot_dsdgram(raprompro_subset_10min_loaded_mrr, artifact_dir):
