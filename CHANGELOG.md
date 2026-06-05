@@ -13,6 +13,27 @@ versioning for published package releases.
 
 ### Fixed
 
+## [0.2.0]
+
+### Added
+
+- Phase A rain-process feature extraction and Phase B classification bridge for
+  scan-based rain-process workflows.
+- Single-hour processing script for GAIA campaign analysis, including explicit
+  window-parameter controls.
+- Poster/report documentation for the rain-process analysis workflow.
+- Local pre-commit Black hook matching the CI formatting lane.
+
+### Changed
+
+- Improved typing coverage in rain-process analysis to keep the typed lane green.
+- Black-formatted rain-process tests to match the CI formatter.
+
+### Fixed
+
+- Fused quicklook plotting tests now build a deterministic plottable fused event,
+  avoiding CI failures when the first scan snapshot is labelled `no_data`.
+
 ## [0.1.1]
 
 ### Added
