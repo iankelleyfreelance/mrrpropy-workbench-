@@ -13,6 +13,55 @@ versioning for published package releases.
 
 ### Fixed
 
+## [0.3.0]
+
+### Added
+
+- Plot examples gallery in the documentation, including regenerated example
+  figures for processed spectra and microphysical profiles.
+- Public velocity-convention metadata on RaProMPro outputs and spectral
+  rain-process features.
+
+### Changed
+
+- Public Doppler/fall velocity outputs now use the negative-downward convention:
+  `W`, `spe_3D.speed`, spectral plots, and spectral process features expose
+  falling hydrometeors as negative velocity.
+- `MRRProData.plot_spectrogram(spectrum_var="spe_3D")` converts legacy
+  positive-downward processed spectra at the plotting boundary when loaded
+  products do not declare the new convention.
+- The microphysical profile example now distinguishes `LWC_all` and `LWC` with
+  clearer colors, widths, and markers.
+- The plot examples gallery uses a fixed two-column desktop layout with mobile
+  fallback and wraps long method names.
+
+### Fixed
+
+- Loading an older RaProMPro product now warns when its velocity convention is
+  ambiguous, preventing silent interpretation of legacy positive-downward
+  `W`/`speed` as current public output.
+
+## [0.2.0]
+
+### Added
+
+- Phase A rain-process feature extraction and Phase B classification bridge for
+  scan-based rain-process workflows.
+- Single-hour processing script for GAIA campaign analysis, including explicit
+  window-parameter controls.
+- Poster/report documentation for the rain-process analysis workflow.
+- Local pre-commit Black hook matching the CI formatting lane.
+
+### Changed
+
+- Improved typing coverage in rain-process analysis to keep the typed lane green.
+- Black-formatted rain-process tests to match the CI formatter.
+
+### Fixed
+
+- Fused quicklook plotting tests now build a deterministic plottable fused event,
+  avoiding CI failures when the first scan snapshot is labelled `no_data`.
+
 ## [0.1.1]
 
 ### Added

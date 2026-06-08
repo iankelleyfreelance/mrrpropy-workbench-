@@ -9,11 +9,12 @@ import numpy as np
 from numpy.typing import NDArray
 import xarray as xr
 
+from mrrpropy.processes import PROCESS_CODES, PROCESS_MARKERS, PROCESS_SIGNATURES, ProcessSignature
+
 FloatArray: TypeAlias = NDArray[np.float64]
 Float32Array: TypeAlias = NDArray[np.float32]
 IntArray: TypeAlias = NDArray[np.int_]
 BoolArray: TypeAlias = NDArray[np.bool_]
-ProcessSignature: TypeAlias = tuple[int, int, int]
 
 
 class HexagramAssets(TypedDict):
@@ -23,41 +24,6 @@ class HexagramAssets(TypedDict):
     yx_cells: IntArray
     area_cells: IntArray
 
-
-# ============================================================
-# Tabla de procesos: signos sobre [Dm, Nw, LWC] = [R, G, B]
-# -1 = banda baja
-#  0 = banda central
-# +1 = banda alta
-# ============================================================
-PROCESS_SIGNATURES: dict[str, list[ProcessSignature]] = {
-    "breakup":      [(-1, +1,  0)],   # Dm↓, Nw↑, LWC≈const
-    "coalescence":  [(+1, -1,  0)],   # Dm↑, Nw↓, LWC≈const
-    "evaporation":  [(-1, -1, -1), (-1, -1,  0), (-1, 0, -1)],   # Dm↓, Nw↓, LWC↓
-    "growth":       [(+1,  0, +1)],   # Dm↑, Nw≈const, LWC↑
-    "activation":   [(+1, +1, +1), (0,+1,+1)],   # Dm↑, Nw↑, LWC↑
-}
-
-PROCESS_CODES: dict[str, str] = {
-    'unknown': 'UNKNOWN',
-    'steady_or_weak': 'STEADY',
-    'breakup': 'BREAKUP',
-    'coalescence': 'COAL.',
-    'evaporation': 'EVAP.',
-    'growth': 'GROWTH',
-    'activation': 'ACTIV.'
-}
-
-PROCESS_MARKERS: dict[str, str] = {
-    "breakup": "o",          # círculo
-    "coalescence": "s",      # cuadrado
-    "evaporation": "v",      # triángulo abajo
-    "growth": "^",           # triángulo arriba
-    "activation": "D",       # diamante
-    "steady_or_weak": "P",   # plus filled
-    "unknown": "X",          # X
-    "no_data": ".",          # punto pequeño
-}
 
 def build_rgb_from_trends(
     ds: xr.Dataset,
@@ -840,7 +806,7 @@ def get_process_hexagram_mask(
     Parameters
     ----------
     process : str
-        Nombre del proceso ('breakup', 'coalescence', 'evaporation',
+        Nombre del proceso ('breakup', 'growth_depletion', 'evaporation',
         'growth', 'activation', ...).
     k : int
         Parámetro del hexagrama.
@@ -932,7 +898,12 @@ def plot_process_to_hexagram(
     alpha_process: float = 0.95,
     process_color: tuple[float, float, float] | None = None,
     show_cell_centers: bool = False,
+    crop_to_process: bool = False,
+    crop_margin_cells: int = 6,
     title: str | None = None,
+    title_fs: float = 16,
+    label_fs: float = 13,
+    tick_fs: float = 11,
     savefig: bool = False,
     output_dir: str | Path | None = None,
     dpi: int = 200,
@@ -992,7 +963,7 @@ def plot_process_to_hexagram(
 
     ny, nx = img.shape[:2]
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
 
     if show_background:
         ax.imshow(
@@ -1030,17 +1001,21 @@ def plot_process_to_hexagram(
         ax.scatter(xs, ys, s=8, c="k", alpha=0.6)
 
     if title is None:
-        title = f"Hexagram space for process: {process} (k={k}, tol_center={tol_center:.3f})"
-    ax.set_title(title)
+        title = f"{process.capitalize()} | k={k} | tol={tol_center:.3f}"
+    ax.set_title(title, fontsize=title_fs, pad=8)
 
-    ax.set_xlabel("hex_x")
-    ax.set_ylabel("hex_y")
-    ax.set_xlim(-0.5, nx - 0.5)
-    ax.set_ylim(-0.5, ny - 0.5)
+    ax.set_xlabel("hex_x", fontsize=label_fs)
+    ax.set_ylabel("hex_y", fontsize=label_fs)
+    ax.tick_params(labelsize=tick_fs)
+    if crop_to_process and len(xs) > 0:
+        margin = max(int(crop_margin_cells), 0)
+        ax.set_xlim(max(xs.min() - margin - 0.5, -0.5), min(xs.max() + margin + 0.5, nx - 0.5))
+        ax.set_ylim(max(ys.min() - margin - 0.5, -0.5), min(ys.max() + margin + 0.5, ny - 0.5))
+    else:
+        ax.set_xlim(-0.5, nx - 0.5)
+        ax.set_ylim(-0.5, ny - 0.5)
     ax.set_aspect("equal")
     ax.grid(False)
-
-    fig.tight_layout()
 
     filepath = None
     if savefig:

@@ -26,8 +26,9 @@
     <h2>Development environment</h2>
     <pre><code>uv sync --group dev
 uv run pytest -m "not slow"
-uv run black --check mrrpropy tests
-uv run mypy</code></pre>
+uv run black --check mrrpropy/cli tests
+uv run mypy
+uv run pre-commit install</code></pre>
 
     <h2>Repository conventions</h2>
     <ul>

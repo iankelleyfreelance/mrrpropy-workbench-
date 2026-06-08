@@ -147,6 +147,105 @@ a:hover {
   font-size: 0.95rem;
 }
 
+.plot-tabs > input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-list label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  color: var(--accent);
+  background: #f8f5ed;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.tab-panel {
+  display: none;
+}
+
+#tab-raw:checked ~ .tab-list label[for="tab-raw"],
+#tab-processed:checked ~ .tab-list label[for="tab-processed"],
+#tab-processes:checked ~ .tab-list label[for="tab-processes"],
+#tab-column:checked ~ .tab-list label[for="tab-column"] {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+#tab-raw:checked ~ .raw-panel,
+#tab-processed:checked ~ .processed-panel,
+#tab-processes:checked ~ .processes-panel,
+#tab-column:checked ~ .column-panel {
+  display: block;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.plot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.plot-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.plot-card h3 code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.plot-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.plot-card pre {
+  margin: 0;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plot-card figure {
+  margin: auto 0 0;
+}
+
+.plot-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: white;
+}
+
 .prose {
   padding: 1.5rem;
   margin: 2rem auto 3rem;
@@ -175,6 +274,12 @@ ol {
 
 @media (max-width: 850px) {
   .hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .example-grid {
     grid-template-columns: 1fr;
   }
 }

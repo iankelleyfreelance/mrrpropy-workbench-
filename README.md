@@ -46,6 +46,15 @@ trend characterization:
   the rest of the pipeline.
 - OLS trend fitting remains available only as a legacy or diagnostic comparison path.
 
+## Velocity sign convention
+
+Public `mrrpropy` outputs use Doppler/fall velocity with negative values indicating
+downward hydrometeor motion. In RaProMPro products this applies to `W` and to the
+`speed` coordinate of `spe_3D`; spectral plotting and rain-process spectral
+features use the same negative-downward convention. The retained RaProMPro
+algorithm keeps its original positive-downward convention internally, and the sign
+is converted only at the public output and plotting/feature boundary.
+
 ## Development
 
 Typical local commands:
@@ -56,7 +65,8 @@ uv run python -c "import mrrpropy"
 uv run pytest -m "not slow"
 uv run pytest -m slow
 uv run mypy
-uv run black --check mrrpropy tests
+uv run black --check mrrpropy/cli tests
+uv run pre-commit install
 uv run python scripts/benchmark_raprompro.py --quick --repeats 1
 ```
 

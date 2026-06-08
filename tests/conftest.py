@@ -6,12 +6,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import xarray as xr
 
 from mrrpropy.raw_class import MRRProData
 
 
 RAW_FIXTURE_PATH = Path(
-    r"./tests/data/RAW/mrrpro81/2025/03/08/20250308_120000_10min.nc"
+    r"./tests/data/RAW/mrrpro81/2025/10/29/20251029_192300_10min.nc"
 )
 PRODUCTS_ROOT = Path(r"./tests/data/PRODUCTS")
 
@@ -52,6 +53,25 @@ def _raw_to_generated_product_path(raw_path: Path, products_root: Path) -> Path:
 def _env_truthy(name: str) -> bool:
     value = os.getenv(name, "").strip().lower()
     return value in {"1", "true", "yes", "on"}
+
+
+def _is_valid_generated_product(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size <= 1024:
+        return False
+    try:
+        ds = xr.open_dataset(path)
+        ok = (
+            "time" in ds.coords
+            and ds.sizes.get("time", 0) > 0
+            and len(ds.data_vars) > 0
+            and str(ds.attrs.get("velocity_convention", "")).startswith(
+                "Public RaProMPro velocity outputs use negative-downward"
+            )
+        )
+        ds.close()
+        return ok
+    except Exception:
+        return False
 
 
 @pytest.fixture(scope="session")
@@ -137,7 +157,7 @@ def generated_raprompro_path(
     output_dir.mkdir(parents=True, exist_ok=True)
     force_reprocess = _env_truthy("MRRPRO_FORCE_REPROCESS")
 
-    if not force_reprocess and output_path.exists() and output_path.stat().st_size > 0:
+    if not force_reprocess and _is_valid_generated_product(output_path):
         return output_path
 
     mrr = MRRProData.from_file(raw_dataset_path)

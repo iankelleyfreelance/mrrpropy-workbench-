@@ -127,8 +127,49 @@ def test_classify_rain_process_uses_tau_signatures():
         min_tau_strength=0.1,
     )
 
-    assert list(classified["proc_label"].values) == ["breakup", "coalescence"]
+    assert list(classified["proc_label"].values) == ["breakup", "growth_depletion"]
     assert classified.attrs["classification_basis"] == "canonical_trend_sign"
+
+
+def test_classify_rain_process_recognizes_growth_depletion_gain_and_loss():
+    analysis = xr.Dataset(
+        coords={"time": np.array([0, 1], dtype=int)},
+        attrs={
+            "rgb_mapping": {"R": "Dm", "G": "Nw", "B": "LWC"},
+            "tau_zero_tol": 0.25,
+            "trend_method": "kendall_theilsen",
+        },
+    )
+    analysis["R"] = xr.DataArray(np.array([0.85, 0.85]), dims=("time",))
+    analysis["G"] = xr.DataArray(np.array([0.15, 0.15]), dims=("time",))
+    analysis["B"] = xr.DataArray(np.array([0.15, 0.85]), dims=("time",))
+
+    for name, values in {
+        "trend_sign_Dm": np.array([1, 1]),
+        "trend_sign_Nw": np.array([-1, -1]),
+        "trend_sign_LWC": np.array([-1, 1]),
+        "trend_strength_Dm": np.array([0.8, 0.8]),
+        "trend_strength_Nw": np.array([0.8, 0.8]),
+        "trend_strength_LWC": np.array([0.8, 0.8]),
+        "trend_score_Dm": np.array([0.8, 0.8]),
+        "trend_score_Nw": np.array([-0.8, -0.8]),
+        "trend_score_LWC": np.array([-0.8, 0.8]),
+        "trend_p_Dm": np.array([0.01, 0.01]),
+        "trend_p_Nw": np.array([0.01, 0.01]),
+        "trend_p_LWC": np.array([0.01, 0.01]),
+    }.items():
+        analysis[name] = xr.DataArray(values, dims=("time",))
+
+    classified = process_analysis.classify_rain_process(
+        None,
+        analysis=analysis,
+        min_tau_strength=0.1,
+    )
+
+    assert list(classified["proc_label"].values) == [
+        "growth_depletion_loss",
+        "growth_depletion_gain",
+    ]
 
 
 def test_classify_rain_process_filters_weak_tau():

@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: uv run black mrrpropy/cli tests
+        language: system
+        pass_filenames: false

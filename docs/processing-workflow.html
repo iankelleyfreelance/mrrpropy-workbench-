@@ -36,8 +36,25 @@
       <li><code>Ze</code>: equivalent reflectivity corrected by PIA for drizzle/rain.</li>
       <li><code>Zea</code>: equivalent attenuated reflectivity.</li>
       <li><code>DBPIA</code>: path-integrated attenuation in dB.</li>
+      <li><code>W</code>: fall velocity with aliasing correction. In public <code>mrrpropy</code> outputs, negative values indicate downward hydrometeor motion.</li>
       <li><code>Dm</code>, <code>Nw</code>, <code>LWC</code>, <code>RR</code>: microphysical variables used downstream by the analysis API.</li>
     </ul>
+
+    <h2>Velocity sign convention</h2>
+    <p>
+      Public <code>mrrpropy</code> products and plots use Doppler/fall velocity with
+      negative values for downward motion. This applies to <code>W</code>, to the
+      <code>speed</code> coordinate of <code>spe_3D</code>, to spectral plots, and to
+      rain-process spectral features such as <code>v_mean_top</code> and
+      <code>delta_v_mean</code>. The retained RaProMPro scientific core keeps its
+      original positive-downward convention internally; the sign conversion happens
+      only at the public output and plotting/feature boundary.
+    </p>
+    <p>
+      For layer features, <code>delta_v_*</code> is still computed as bottom minus
+      top. With the negative-downward convention, a more negative value at the
+      bottom means stronger downward motion there.
+    </p>
 
     <h2>Representative workflow</h2>
     <pre><code>processed = mrr.process_raprompro(
