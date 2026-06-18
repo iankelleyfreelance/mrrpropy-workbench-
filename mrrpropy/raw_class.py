@@ -23,6 +23,8 @@ from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from mpl_toolkits.mplot3d import Axes3D
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -827,6 +829,64 @@ class MRRProData:
         (fig, filepath) : (Figure, Path | None)
         """
         return processed_plotting.plot_dsd_by_range(
+            self,
+            target_datetime,
+            ranges,
+            use_log10=use_log10,
+            vmin=vmin,
+            vmax=vmax,
+            ncol=ncol,
+            savefig=savefig,
+            output_dir=output_dir,
+            fig=fig,
+            ax=ax,
+            **kwargs,
+        )
+    
+    def plot_DSD_by_range_3d(
+        self,
+        target_datetime,
+        ranges: list[float] | np.ndarray,
+        *,
+        use_log10: bool = False,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        ncol: int = 2,
+        savefig: bool = False,
+        output_dir=None,
+        fig=None,
+        ax=None,
+        **kwargs,
+    ) -> tuple[Figure, Path | None]:
+        """
+        Plot several N(D) curves at a fixed time for multiple provided ranges,
+        using raprompro dsd_3D(time, range, DropSize).
+
+        Parameters
+        ----------
+        target_datetime : datetime | np.datetime64 | str
+            Target time. Nearest time gate is used.
+        ranges : list[float] | np.ndarray
+            List of ranges in meters. Nearest range gate is used for each.
+        use_log10 : bool, default False
+            If True, plot log10(N). If False, plot N in linear units (log y-scale).
+            NOTE: If dsd_3D is stored already in log10, conversion is handled automatically.
+        vmin, vmax : float | None
+            Optional y-limits (applied as ylim). If both are None, no limits set.
+        ncol : int, default 2
+            Legend columns.
+        fig, ax : matplotlib Figure/Axes, optional
+            Reuse existing axes.
+        output_dir : Path, optional
+            Output directory if savefig=True.
+        savefig : bool, default False
+            Save to disk if True.
+
+        Returns
+        -------
+        (fig, filepath) : (Figure, Path | None)
+        """
+        return processed_plotting.plot_dsd_by_range_3d(
             self,
             target_datetime,
             ranges,
