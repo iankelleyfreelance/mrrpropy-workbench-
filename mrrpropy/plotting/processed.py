@@ -120,7 +120,7 @@ def plot_dsdgram(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_dsd_by_range(
@@ -271,7 +271,7 @@ def plot_dsd_by_range(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 def plot_dsd_by_range_3d(
     subject: SupportsProcessedPlotting,
@@ -436,7 +436,7 @@ def plot_dsd_by_range_3d(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_microphysical_properties_profiles(

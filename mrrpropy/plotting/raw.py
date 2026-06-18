@@ -125,7 +125,7 @@ def plot_spectrum(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_spectra_by_range(
@@ -285,7 +285,7 @@ def plot_spectra_by_range(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_spectrogram(
@@ -365,4 +365,4 @@ def plot_spectrogram(
         )
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath

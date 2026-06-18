@@ -795,7 +795,7 @@ def plot_rain_process_in_layer_hexagram(
         filepath = outdir / f"rain_process_hex_{safe_t0}_{safe_t1}_{safe_layer}_k{k}.png"
         fig.savefig(filepath, dpi=dpi)
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_processes_evolution(
@@ -966,7 +966,7 @@ def plot_processes_evolution(
         )
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_column_process_scan(
@@ -1154,7 +1154,7 @@ def plot_column_process_scan(
         filepath = outdir / f"column_process_scan_{color_mode}_{safe_t0}_{safe_t1}.png"
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_fused_process_quicklook(
@@ -1420,7 +1420,7 @@ def plot_fused_process_quicklook(
         filepath = outdir / f"fused_process_quicklook_{safe_t0}_{safe_t1}.png"
         fig.savefig(filepath, dpi=int(dpi), bbox_inches="tight")
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_scan_process_scatter_compare(
@@ -1619,7 +1619,7 @@ def plot_scan_process_scatter_compare(
         )
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-    return fig, filepath
+    return fig, ax, filepath
 
 
 def plot_classified_processes_on_hexagram(
@@ -1764,4 +1764,4 @@ def plot_classified_processes_on_hexagram(
         filepath = outdir / f"classified_processes_hexagram_{t0s}_{t1s}_k{k}.png"
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-    return fig, filepath
+    return fig, ax, filepath
