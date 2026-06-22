@@ -282,17 +282,17 @@ def _fused_df_from_scan(scan_df: pd.DataFrame) -> pd.DataFrame:
 
 # normal quicklook.
 def quicklook_raw(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.quicklook(variable="Ze", source="raw", vmin=-10, vmax=40)
+    fig, _, _ = ctx.mrr.quicklook(variable="Ze", source="raw", vmin=-10, vmax=40)
     return _save(fig, output_dir, "quicklook_raw_ze.png", PERIOD)
 
 # *enhanced* quicklook.
 def quicklook_raprompro(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.quicklook(variable="Ze", source="raprompro", vmin=-10, vmax=40)
+    fig, _, _ = ctx.mrr.quicklook(variable="Ze", source="raprompro", vmin=-10, vmax=40)
     return _save(fig, output_dir, "quicklook_raprompro_ze.png", PERIOD)
 
 # Plot a spectrum showing doppler velocity on x and spectrum [dB] on y.
 def plot_spectrum(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_spectrum(
+    fig, _, _ = ctx.mrr.plot_spectrum(
         TARGET_TIME,
         ctx.target_range,
         spectrum_var="spectrum_raw",
@@ -306,28 +306,28 @@ def plot_spectra_by_range(ctx: PlotContext, output_dir: Path) -> Path:
         .values[[5, ctx.mrr.ds.sizes["range"] // 2, -5]]
         .astype(float)
     )
-    fig, _ = ctx.mrr.plot_spectra_by_range(TARGET_TIME, ranges)
+    fig, _, _ = ctx.mrr.plot_spectra_by_range(TARGET_TIME, ranges)
     return _save(fig, output_dir, "plot_spectra_by_range.png", PERIOD)
 
 
 # Plot velocity (x), range (y), and intensity (color).
 def plot_spectrogram_raw(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_spectrogram(TARGET_TIME, spectrum_var="spectrum_raw")
+    fig, _, _ = ctx.mrr.plot_spectrogram(TARGET_TIME, spectrum_var="spectrum_raw")
     return _save(fig, output_dir, "plot_spectrogram_raw.png", PERIOD)
 
 # Raprompro filters out some things, so plot that.
 def plot_spectrogram_raprompro(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_spectrogram(TARGET_TIME, spectrum_var="spe_3D")
+    fig, _, _ = ctx.mrr.plot_spectrogram(TARGET_TIME, spectrum_var="spe_3D")
     return _save(fig, output_dir, "plot_spectrogram_raprompro.png", PERIOD)
 
 # I don't know what this is but it looks cool.
 def plot_dsdgram(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_DSDgram(target_datetime=TARGET_TIME)
+    fig, _, _ = ctx.mrr.plot_DSDgram(target_datetime=TARGET_TIME)
     return _save(fig, output_dir, "plot_dsdgram.png", PERIOD)
 
 # Plot the droplet size distribution (DSD) as a function of range. Diameter (x) and Number (y, log)
 def plot_dsd_by_range(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_DSD_by_range(
+    fig, _, _ = ctx.mrr.plot_DSD_by_range(
         TARGET_TIME,
         ranges=np.arange(3000, 4500, 250),
     )
@@ -335,7 +335,7 @@ def plot_dsd_by_range(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Plot the DSD by range in 3D. This isn't really useful.
 def plot_dsd_by_range_3d(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_DSD_by_range_3d(
+    fig, _, _ = ctx.mrr.plot_DSD_by_range_3d(
         TARGET_TIME,
         ranges=np.arange(3000, 4500, 100),
     )
@@ -350,7 +350,7 @@ def plot_microphysical_profiles(ctx: PlotContext, output_dir: Path) -> Path:
 
 # I believe this plots each "process" event as a point on a plot showing the change in MIC_PRO
 def plot_rain_process_2d(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_rain_process_in_layer_2D(
+    fig, _, _ = ctx.mrr.plot_rain_process_in_layer_2D(
         target_datetime=PERIOD,
         layer=LAYER,
         x="Dm",
@@ -364,7 +364,7 @@ def plot_rain_process_2d(ctx: PlotContext, output_dir: Path) -> Path:
 
 # I'm not sure what the difference between this and the previous one is.
 def plot_event_scatter(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_event_scatter(
+    fig, _, _ = ctx.mrr.plot_event_scatter(
         target_datetime=PERIOD,
         layer=LAYER,
         x="Dm",
@@ -377,7 +377,7 @@ def plot_event_scatter(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Same here. Need more data points.
 def plot_region_scatter(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_region_scatter(
+    fig, _, _ = ctx.mrr.plot_region_scatter(
         target_datetime=PERIOD,
         z_bottom_m=LAYER[0],
         z_top_m=LAYER[1],
@@ -393,7 +393,7 @@ def plot_region_scatter(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Same.
 def plot_process_scatter(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_process_scatter(
+    fig, _, _ = ctx.mrr.plot_process_scatter(
         classified=ctx.fixed_classified,
         process=ctx.representative_process,
         target_datetime=PERIOD,
@@ -408,7 +408,7 @@ def plot_process_scatter(ctx: PlotContext, output_dir: Path) -> Path:
 
 # This one looks broken. I need to understand events.
 def plot_event_vertical_profiles(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_event_vertical_percent_profiles(
+    fig, _, _ = ctx.mrr.plot_event_vertical_percent_profiles(
         target_datetime=PERIOD,
         layer=LAYER,
         variables=("Dm", "Nw", "LWC"),
@@ -418,7 +418,7 @@ def plot_event_vertical_profiles(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Same here.
 def plot_process_vertical_profiles(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_process_vertical_percent_profiles(
+    fig, _, _ = ctx.mrr.plot_process_vertical_percent_profiles(
         classified=ctx.fixed_classified,
         process=ctx.representative_process,
         target_datetime=PERIOD,
@@ -430,7 +430,7 @@ def plot_process_vertical_profiles(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Plots each process on the hexagram using a colorbar to show time.
 def plot_layer_hexagram(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_rain_process_in_layer_hexagram(
+    fig, _, _ = ctx.mrr.plot_rain_process_in_layer_hexagram(
         analysis=ctx.fixed_analysis,
         alpha_hexagram=0.5,
         cmap="viridis",
@@ -439,7 +439,7 @@ def plot_layer_hexagram(ctx: PlotContext, output_dir: Path) -> Path:
 
 # I also don't understand this.
 def plot_processes_evolution(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_processes_evolution(
+    fig, _, _ = ctx.mrr.plot_processes_evolution(
         classified=ctx.fixed_classified,
         analysis=ctx.fixed_analysis,
         figsize=(14, 10),
@@ -452,7 +452,7 @@ def plot_processes_evolution(ctx: PlotContext, output_dir: Path) -> Path:
 
 # Run classification on the events and plot the classified ones on the hexagram.
 def plot_classified_hexagram(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_classified_processes_on_hexagram(
+    fig, _, _ = ctx.mrr.plot_classified_processes_on_hexagram(
         classified=ctx.fixed_classified,
         analysis=ctx.fixed_analysis,
         show_background=True,
@@ -467,11 +467,11 @@ def plot_classified_hexagram(ctx: PlotContext, output_dir: Path) -> Path:
 
 # My favorite! Show the processes. Run sensitivity testing on this and make one with different coloring.
 def plot_column_process_scan(ctx: PlotContext, output_dir: Path) -> Path:
-    fig, _ = ctx.mrr.plot_column_process_scan(
+    fig, _, _ = ctx.mrr.plot_column_process_scan(
         scan_df=ctx.scan_df,
         figsize=(10, 6),
-        color_mode = "hexagram",
-        marker="gaussian"
+        color_mode="hexagram",
+        marker_mode="square",
     )
 
     return _save(fig, output_dir, "plot_column_process_scan.png", PERIOD)
@@ -485,7 +485,7 @@ def plot_scan_scatter_compare(ctx: PlotContext, output_dir: Path) -> Path:
             if label not in {"unknown", "no_data", "steady_or_weak"}
         }
     )[:2]
-    fig, _ = ctx.mrr.plot_scan_process_scatter_compare(
+    fig, _, _ = ctx.mrr.plot_scan_process_scatter_compare(
         scan_df=ctx.scan_df,
         processes=selected or None,
         show_centroids=True,
@@ -496,7 +496,7 @@ def plot_scan_scatter_compare(ctx: PlotContext, output_dir: Path) -> Path:
 # I *think* this is showing the processes overlaid on quicklook. If so it's what I need.
 def plot_fused_quicklook(ctx: PlotContext, output_dir: Path) -> Path:
     fused_df = _fused_df_from_scan(ctx.scan_df)
-    fig, _ = plot_fused_process_quicklook(
+    fig, _, _ = plot_fused_process_quicklook(
         ctx.scan_df,
         fused_df,
         processes=QUICKLOOK_PROCESSES,
@@ -506,7 +506,7 @@ def plot_fused_quicklook(ctx: PlotContext, output_dir: Path) -> Path:
 
 # This shows the regions on the hexagram for a given process. See the powerpoint for more.
 def plot_hexagram_process(ctx: PlotContext, output_dir: Path) -> Path:
-    fig = plot_process_to_hexagram(
+    fig, _, _ = plot_process_to_hexagram(
         process="activation",
         k=11,
         tol_center=0.15,
@@ -593,7 +593,7 @@ def sensitivity_test_plot_column_process_scan(ctx, output_dir, lim, period, raw_
             min_tau_strength=tau_strength,
         )
 
-        fig_individual, _ = ctx.mrr.plot_column_process_scan(
+        fig_individual, _, _ = ctx.mrr.plot_column_process_scan(
             scan_df=scan_df_test,
             figsize=(8, 5),
         )
@@ -670,13 +670,15 @@ if __name__ == "__main__":
 # In[31]:
 
 
-fig, ax = mrr.quicklook()
+fig, ax, _ = mrr.quicklook()
 ax.plot()
 ax.set_ylim(0, 5000)
 plt.show()  
 
 
 # In[ ]:
+
+
 
 
 

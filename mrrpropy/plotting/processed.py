@@ -49,7 +49,7 @@ def plot_dsdgram(
     savefig: bool = False,
     output_dir: Path | None = None,
     **kwargs: Any,
-) -> tuple[Figure, Path | None]:
+) -> tuple[Figure, Axes, Path | None]:
     """Plot a DSD gram at the nearest requested time."""
     if subject.raprompro is None:
         raise RuntimeError(
@@ -137,7 +137,7 @@ def plot_dsd_by_range(
     fig: Figure | None = None,
     ax: Axes | None = None,
     **kwargs: Any,
-) -> tuple[Figure, Path | None]:
+) -> tuple[Figure, Axes, Path | None]:
     """Plot several N(D) curves at a fixed time for multiple provided ranges."""
     pcfg = subject.plot_cfg
     dpi = kwargs.get("dpi", pcfg.dpi)
@@ -287,7 +287,7 @@ def plot_dsd_by_range_3d(
     fig: Figure | None = None,
     ax: Axes | None = None,
     **kwargs: Any,
-) -> tuple[Figure, Path | None]:
+) -> tuple[Figure, Axes, Path | None]:
     """Plot several N(D) curves at a fixed time for multiple provided ranges."""
     pcfg = subject.plot_cfg
     dpi = kwargs.get("dpi", pcfg.dpi)
